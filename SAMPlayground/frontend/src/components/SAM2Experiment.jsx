@@ -37,7 +37,7 @@ function SAM2Experiment({ experimentId }) {
     }
 
     // Helper: Determine what UI to show based on timeline
-    const shouldShowBoundsAdjustment = () => videoUrl && frameData
+    const shouldShowBoundsAdjustment = () => videoUrl && (frameData || (bounds.top && bounds.top.length > 0))
     const shouldShowPlayerDetection = () => hasCompletedStep('video_loaded') || hasCompletedStep('bounds_adjusted')
     const shouldShowSegmentation = () => hasCompletedStep('players_detected')
 
@@ -137,15 +137,33 @@ function SAM2Experiment({ experimentId }) {
         }
     }
 
-    const handleNameEdit = () => {
-        console.log('handleNameEdit called, current name:', experimentName)
-        const newName = prompt('Enter new experiment name:', experimentName)
-        console.log('User entered:', newName)
-        if (newName && newName.trim() && newName !== experimentName) {
-            console.log('Calling updateExperimentName with:', newName.trim())
-            updateExperimentName(newName.trim())
-        } else {
-            console.log('Name edit cancelled or unchanged')
+    const [isEditingName, setIsEditingName] = useState(false)
+    const [tempName, setTempName] = useState('')
+    const nameInputRef = useRef(null)
+
+    useEffect(() => {
+        if (isEditingName && nameInputRef.current) {
+            nameInputRef.current.focus()
+        }
+    }, [isEditingName])
+
+    const startEditingName = () => {
+        setTempName(experimentName)
+        setIsEditingName(true)
+    }
+
+    const saveName = () => {
+        if (tempName && tempName.trim() && tempName !== experimentName) {
+            updateExperimentName(tempName.trim())
+        }
+        setIsEditingName(false)
+    }
+
+    const handleNameKeyDown = (e) => {
+        if (e.key === 'Enter') {
+            saveName()
+        } else if (e.key === 'Escape') {
+            setIsEditingName(false)
         }
     }
 
@@ -189,6 +207,12 @@ function SAM2Experiment({ experimentId }) {
             console.log('Set frameData to:', data)
             setBounds({ top: data.top_corners, bottom: data.bottom_corners })
             console.log('Set bounds:', { top: data.top_corners, bottom: data.bottom_corners })
+
+            // Save initial bounds to timeline so they persist
+            await saveTimelineEntry('bounds_adjusted', {
+                top_corners: data.top_corners,
+                bottom_corners: data.bottom_corners
+            })
             // UI state now determined by timeline, not currentStep
         } catch (error) {
             const errorMsg = `Error loading video: ${error.message}`
@@ -350,6 +374,8 @@ function SAM2Experiment({ experimentId }) {
 
         setIsLoading(true)
         setLoadingMessage('Detecting players with YOLO...')
+        const startTime = performance.now() // Start timing
+
         try {
             const response = await fetch('http://localhost:8000/detect-players', {
                 method: 'POST',
@@ -372,6 +398,8 @@ function SAM2Experiment({ experimentId }) {
             }
 
             const data = await response.json()
+            const endTime = performance.now()
+            const executionTime = (endTime - startTime) / 1000 // Seconds
             console.log('Detected players:', data)
 
             // Set players with safe defaults to prevent rendering errors
@@ -382,14 +410,15 @@ function SAM2Experiment({ experimentId }) {
                 metadata: data.metadata || {}
             })
 
-            // Save timeline entry with full player bbox data
+            // Save timeline entry with full player bbox data AND execution time
             await saveTimelineEntry('players_detected', {
                 top_count: data.top_players?.length || 0,
                 bottom_count: data.bottom_players?.length || 0,
                 similarity: data.similarity || 0,
                 top_players: data.top_players || [],
                 bottom_players: data.bottom_players || [],
-                metadata: data.metadata || {}
+                metadata: data.metadata || {},
+                execution_time: executionTime
             })
 
             setLoadingMessage('')
@@ -568,14 +597,28 @@ function SAM2Experiment({ experimentId }) {
             {/* Experiment Header */}
             <div className="experiment-header">
                 <div className="experiment-title-row">
-                    <h2 onClick={handleNameEdit} style={{ cursor: 'pointer' }} title="Click to edit">
-                        {experimentName}
-                    </h2>
-                    <button onClick={handleNameEdit} className="edit-name-button">✏️</button>
+                    {isEditingName ? (
+                        <input
+                            ref={nameInputRef}
+                            type="text"
+                            value={tempName}
+                            onChange={(e) => setTempName(e.target.value)}
+                            onBlur={saveName}
+                            onKeyDown={handleNameKeyDown}
+                            className="experiment-name-input"
+                        />
+                    ) : (
+                        <>
+                            <h2 onClick={startEditingName} title="Click to edit">
+                                {experimentName}
+                            </h2>
+                            <button onClick={startEditingName} className="edit-name-button" title="Edit name">✏️</button>
+                        </>
+                    )}
                 </div>
                 {experiment && (
                     <p className="experiment-meta">
-                        Last updated: {formatDate(experiment.updated_at)}
+                        Last updated: {new Date(experiment.updated_at).toLocaleString()}
                     </p>
                 )}
             </div>
@@ -616,7 +659,7 @@ function SAM2Experiment({ experimentId }) {
                                     if (players.top.length > 0) setPlayers({ ...players })
                                 }}
                                 // Keep video visible across steps
-                                style={{ display: videoUrl && (shouldShowBoundsAdjustment() || players.top.length > 0) ? 'block' : 'none' }}
+                                style={{ display: videoUrl ? 'block' : 'none' }}
                             />
                             <canvas
                                 ref={canvasRef}
@@ -626,7 +669,7 @@ function SAM2Experiment({ experimentId }) {
                                 onMouseUp={handleMouseUp}
                                 onMouseLeave={handleMouseLeave}
                                 // Keep canvas visible across steps where interaction/drawing is needed
-                                style={{ display: videoUrl && (shouldShowBoundsAdjustment() || players.top.length > 0) ? 'block' : 'none' }}
+                                style={{ display: videoUrl ? 'block' : 'none' }}
                             />
                         </div>
 
@@ -638,7 +681,15 @@ function SAM2Experiment({ experimentId }) {
                         )}
 
 
-                        {/* Action Buttons Panel */}
+                        {/* Sequential Results - shows history of actions */}
+                        <SequentialResults
+                            experiment={experiment}
+                            bounds={bounds}
+                            players={players}
+                            segmentResult={segmentResult}
+                        />
+
+                        {/* Action Buttons Panel - shows NEXT available action */}
                         {videoUrl && (
                             <div className="action-panel">
                                 {shouldShowBoundsAdjustment() && !players.top.length && (
@@ -704,13 +755,7 @@ function SAM2Experiment({ experimentId }) {
                             </div>
                         )}
 
-                        {/* Sequential Results - replaces both step sections and timeline */}
-                        <SequentialResults
-                            experiment={experiment}
-                            bounds={bounds}
-                            players={players}
-                            segmentResult={segmentResult}
-                        />
+
 
                         {
                             errorLog.length > 0 && (

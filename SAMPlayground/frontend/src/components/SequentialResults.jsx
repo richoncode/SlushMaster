@@ -56,7 +56,13 @@ function SequentialResults({ experiment, bounds, players, segmentResult }) {
                         <div className="entry-header">
                             <span className="entry-icon">👥</span>
                             <span className="entry-title">Players Detected</span>
-                            {duration && <span className="entry-duration">{duration}</span>}
+                            {entry.data.execution_time !== undefined ? (
+                                <span className="entry-duration" title="Execution time">
+                                    ⏱️ {entry.data.execution_time.toFixed(2)}s
+                                </span>
+                            ) : (
+                                duration && <span className="entry-duration">{duration}</span>
+                            )}
                         </div>
                         <div className="entry-content">
                             <div className="player-counts">
@@ -70,6 +76,32 @@ function SequentialResults({ experiment, bounds, players, segmentResult }) {
                                 </div>
                                 <div className="similarity">
                                     Similarity: {((entry.data.similarity || 0) * 100).toFixed(0)}%
+                                </div>
+                            </div>
+
+                            {/* Detailed Player Lists */}
+                            <div className="player-lists-detail" style={{ marginTop: '1rem', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                                <div className="player-list-group">
+                                    <h5 style={{ margin: '0 0 0.5rem 0', color: '#888' }}>Left View Details</h5>
+                                    <div className="player-items-scroll" style={{ maxHeight: '200px', overflowY: 'auto', background: '#222', padding: '0.5rem', borderRadius: '4px' }}>
+                                        {(entry.data.top_players || []).map((p, i) => (
+                                            <div key={i} style={{ fontSize: '0.8rem', color: '#aaa', marginBottom: '0.25rem' }}>
+                                                #{i + 1}: ({p.x1}, {p.y1}) → ({p.x2}, {p.y2}) <span style={{ color: '#666' }}>[{p.confidence?.toFixed(2)}]</span>
+                                            </div>
+                                        ))}
+                                        {(!entry.data.top_players || entry.data.top_players.length === 0) && <div style={{ fontSize: '0.8rem', color: '#666' }}>No players</div>}
+                                    </div>
+                                </div>
+                                <div className="player-list-group">
+                                    <h5 style={{ margin: '0 0 0.5rem 0', color: '#888' }}>Right View Details</h5>
+                                    <div className="player-items-scroll" style={{ maxHeight: '200px', overflowY: 'auto', background: '#222', padding: '0.5rem', borderRadius: '4px' }}>
+                                        {(entry.data.bottom_players || []).map((p, i) => (
+                                            <div key={i} style={{ fontSize: '0.8rem', color: '#aaa', marginBottom: '0.25rem' }}>
+                                                #{i + 1}: ({p.x1}, {p.y1}) → ({p.x2}, {p.y2}) <span style={{ color: '#666' }}>[{p.confidence?.toFixed(2)}]</span>
+                                            </div>
+                                        ))}
+                                        {(!entry.data.bottom_players || entry.data.bottom_players.length === 0) && <div style={{ fontSize: '0.8rem', color: '#666' }}>No players</div>}
+                                    </div>
                                 </div>
                             </div>
                         </div>

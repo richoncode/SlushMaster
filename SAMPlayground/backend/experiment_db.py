@@ -24,6 +24,7 @@ def dict_factory(cursor, row):
 def get_connection():
     """Get database connection with row factory"""
     conn = sqlite3.connect(str(DB_PATH))
+    conn.execute("PRAGMA foreign_keys = ON")
     conn.row_factory = dict_factory
     return conn
 

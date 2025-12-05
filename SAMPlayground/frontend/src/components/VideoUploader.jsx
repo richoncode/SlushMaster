@@ -60,11 +60,12 @@ function VideoUploader({ onUploadComplete }) {
 
     return (
         <div
-            className={`video-uploader ${isDragging ? 'dragging' : ''}`}
+            className={`video-uploader compact ${isDragging ? 'dragging' : ''}`}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
             onClick={() => fileInputRef.current.click()}
+            title="Click or Drag & Drop Video"
         >
             <input
                 type="file"
@@ -75,14 +76,13 @@ function VideoUploader({ onUploadComplete }) {
             />
 
             {uploading ? (
-                <div className="upload-status">
-                    <div className="spinner"></div>
-                    <p>Uploading video...</p>
+                <div className="upload-status-compact">
+                    <div className="spinner-small"></div>
                 </div>
             ) : (
-                <div className="upload-prompt">
-                    <span className="upload-icon">📁</span>
-                    <p>Click or Drag & Drop to upload a soccer video</p>
+                <div className="upload-content-compact">
+                    <span className="upload-icon">📤</span>
+                    <span className="upload-text">Upload Video</span>
                 </div>
             )}
         </div>

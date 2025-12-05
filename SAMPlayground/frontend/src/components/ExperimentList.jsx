@@ -1,13 +1,20 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import './ExperimentList.css'
 
 function ExperimentList({ onSelectExperiment }) {
     const [experiments, setExperiments] = useState([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
+    const [deleteConfirm, setDeleteConfirm] = useState(null)
+    const deleteTimeoutRef = useRef(null)
 
     useEffect(() => {
         loadExperiments()
+        return () => {
+            if (deleteTimeoutRef.current) {
+                clearTimeout(deleteTimeoutRef.current)
+            }
+        }
     }, [])
 
     const loadExperiments = async () => {
@@ -47,17 +54,17 @@ function ExperimentList({ onSelectExperiment }) {
 
     const handleDeleteExperiment = async (experimentId, e) => {
         e.stopPropagation()
-
-        if (!confirm('Are you sure you want to delete this experiment?')) {
-            return
-        }
+        setDeleteConfirm(null)
 
         try {
             const response = await fetch(`http://localhost:8000/experiments/${experimentId}`, {
                 method: 'DELETE'
             })
 
+            console.log('Delete response status:', response.status)
             if (!response.ok) {
+                const text = await response.text()
+                console.error('Delete failed:', text)
                 throw new Error('Failed to delete experiment')
             }
 
@@ -114,11 +121,30 @@ function ExperimentList({ onSelectExperiment }) {
                             <div className="experiment-card-header">
                                 <h3>{exp.name}</h3>
                                 <button
-                                    className="delete-button"
-                                    onClick={(e) => handleDeleteExperiment(exp.id, e)}
-                                    title="Delete experiment"
+                                    className={`delete-button ${deleteConfirm === exp.id ? 'confirming' : ''}`}
+                                    onClick={(e) => {
+                                        e.stopPropagation()
+                                        if (deleteConfirm === exp.id) {
+                                            if (deleteTimeoutRef.current) {
+                                                clearTimeout(deleteTimeoutRef.current)
+                                                deleteTimeoutRef.current = null
+                                            }
+                                            handleDeleteExperiment(exp.id, e)
+                                        } else {
+                                            if (deleteTimeoutRef.current) {
+                                                clearTimeout(deleteTimeoutRef.current)
+                                            }
+                                            setDeleteConfirm(exp.id)
+                                            // Reset confirmation after 3 seconds
+                                            deleteTimeoutRef.current = setTimeout(() => {
+                                                setDeleteConfirm(null)
+                                                deleteTimeoutRef.current = null
+                                            }, 3000)
+                                        }
+                                    }}
+                                    title={deleteConfirm === exp.id ? "Click again to confirm delete" : "Delete experiment"}
                                 >
-                                    ×
+                                    {deleteConfirm === exp.id ? 'Confirm?' : '×'}
                                 </button>
                             </div>
                             <div className="experiment-meta">
@@ -131,16 +157,19 @@ function ExperimentList({ onSelectExperiment }) {
                                     <span className="meta-value">{exp.timeline_count || 0}</span>
                                 </div>
                             </div>
-                            {exp.latest_video && (
-                                <div className="video-indicator">
-                                    📹 Has video
-                                </div>
-                            )}
+                            {
+                                exp.latest_video && (
+                                    <div className="video-indicator">
+                                        📹 Has video
+                                    </div>
+                                )
+                            }
                         </div>
                     ))}
                 </div>
-            )}
-        </div>
+            )
+            }
+        </div >
     )
 }
 

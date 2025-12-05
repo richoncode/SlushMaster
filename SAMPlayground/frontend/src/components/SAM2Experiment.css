@@ -127,6 +127,24 @@
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
+/* Inline Name Input */
+.experiment-name-input {
+    font-size: 1.5rem;
+    font-weight: bold;
+    background: #1a1a1a;
+    border: 1px solid #646cff;
+    border-radius: 4px;
+    color: #e0e0e0;
+    padding: 0.25rem 0.5rem;
+    width: 100%;
+    max-width: 400px;
+}
+
+.experiment-name-input:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(100, 108, 255, 0.2);
+}
+
 .overlay-canvas {
     position: absolute;
     top: 0;

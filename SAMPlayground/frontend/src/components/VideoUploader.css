@@ -1,55 +1,58 @@
-.video-uploader {
-    border: 2px dashed #444;
-    border-radius: 12px;
-    padding: 3rem;
-    text-align: center;
+.video-uploader.compact {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.6rem 1.2rem;
+    border: 1px dashed #666;
+    border-radius: 8px;
+    background: #1a1a1a;
     cursor: pointer;
-    transition: all 0.3s ease;
-    background: #242424;
-    width: 100%;
-    box-sizing: border-box;
+    transition: all 0.2s;
+    min-width: 140px;
+    height: 40px;
+    /* Match button height */
 }
 
-.video-uploader:hover,
-.video-uploader.dragging {
+.video-uploader.compact:hover {
     border-color: #646cff;
     background: #2a2a2a;
 }
 
-.upload-icon {
-    font-size: 3rem;
-    display: block;
-    margin-bottom: 1rem;
+.video-uploader.compact.dragging {
+    border-color: #646cff;
+    background: rgba(100, 108, 255, 0.1);
 }
 
-.upload-prompt p {
-    margin: 0;
-    color: #aaa;
-    font-size: 1.1rem;
-}
-
-.upload-status {
+.upload-content-compact {
     display: flex;
-    flex-direction: column;
     align-items: center;
-    gap: 1rem;
+    gap: 0.5rem;
 }
 
-.spinner {
-    width: 40px;
-    height: 40px;
-    border: 4px solid #444;
-    border-top: 4px solid #646cff;
+.upload-status-compact {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.spinner-small {
+    width: 20px;
+    height: 20px;
+    border: 2px solid #ffffff3d;
+    border-left-color: #646cff;
     border-radius: 50%;
     animation: spin 1s linear infinite;
 }
 
-@keyframes spin {
-    0% {
-        transform: rotate(0deg);
-    }
+.upload-text {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #e0e0e0;
+    white-space: nowrap;
+}
 
-    100% {
+@keyframes spin {
+    to {
         transform: rotate(360deg);
     }
 }
