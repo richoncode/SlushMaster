@@ -1,0 +1,15 @@
+.overlay-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 10;
+    /* pointer-events: none;  <-- REMOVED so we can catch mouse events on SVG background for dragging if needed, but mainly for handles */
+}
+
+/* Make handles interactive */
+.line-handle {
+    pointer-events: auto;
+    transition: r 0.2s;
+}

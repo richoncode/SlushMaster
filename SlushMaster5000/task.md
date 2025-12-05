@@ -12,3 +12,13 @@
     - [x] Implement core features <!-- id: 9 -->
 - [x] Verification <!-- id: 10 -->
     - [x] Verify against guidelines <!-- id: 11 -->
+- [x] New Features <!-- id: 12 -->
+    - [x] Implement Ingredient Filter <!-- id: 13 -->
+    - [x] Add Synonym Support (Coke/Cola, etc.) <!-- id: 14 -->
+- [x] Deployment <!-- id: 15 -->
+    - [x] Configure GitHub Pages <!-- id: 16 -->
+    - [x] Deploy App <!-- id: 17 -->
+- [x] UI Improvements <!-- id: 18 -->
+    - [x] Convert Alcohol Inputs to Sliders <!-- id: 19 -->
+    - [x] Increase Slider Touch Targets <!-- id: 20 -->
+    - [x] Refine Slider Handles (Orange, Hover-only) <!-- id: 21 -->

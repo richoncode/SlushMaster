@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Model files (too large for git)
+*.pt
+*.pth
+*.onnx
+
+# SAM 2 config (keep the yaml)
+# *.yaml
+
+# Temporary files
+backend/debug_log.txt
+backend/temp_frames/
+backend/processed/
+backend/uploads/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

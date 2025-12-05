@@ -1,0 +1,55 @@
+.video-uploader {
+    border: 2px dashed #444;
+    border-radius: 12px;
+    padding: 3rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    background: #242424;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.video-uploader:hover,
+.video-uploader.dragging {
+    border-color: #646cff;
+    background: #2a2a2a;
+}
+
+.upload-icon {
+    font-size: 3rem;
+    display: block;
+    margin-bottom: 1rem;
+}
+
+.upload-prompt p {
+    margin: 0;
+    color: #aaa;
+    font-size: 1.1rem;
+}
+
+.upload-status {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+}
+
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid #444;
+    border-top: 4px solid #646cff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
+}

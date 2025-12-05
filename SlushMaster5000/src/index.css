@@ -1,3 +1,37 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer components {
+    .slider-thumb {
+        @apply appearance-none bg-transparent cursor-pointer;
+    }
+
+    /* Webkit (Chrome, Safari, Edge) */
+    .slider-thumb::-webkit-slider-thumb {
+        @apply appearance-none w-6 h-6 rounded-full bg-orange-500 border-2 border-orange-600 shadow-lg -mt-2 opacity-0 transition-opacity duration-200;
+        cursor: pointer;
+    }
+
+    .slider-thumb:hover::-webkit-slider-thumb {
+        @apply opacity-100;
+    }
+
+    .slider-thumb::-webkit-slider-runnable-track {
+        @apply w-full h-2 bg-white/20 rounded-full;
+    }
+
+    /* Firefox */
+    .slider-thumb::-moz-range-thumb {
+        @apply w-6 h-6 rounded-full bg-orange-500 border-2 border-orange-600 shadow-lg border-none opacity-0 transition-opacity duration-200;
+        cursor: pointer;
+    }
+
+    .slider-thumb:hover::-moz-range-thumb {
+        @apply opacity-100;
+    }
+
+    .slider-thumb::-moz-range-track {
+        @apply w-full h-2 bg-white/20 rounded-full;
+    }
+}

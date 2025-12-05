@@ -1,0 +1,11 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /feedback/{document=**} {
+      // Allow anyone to create feedback
+      allow create: if true;
+      // Only allow admins (or no one for now) to read feedback to prevent spam/abuse
+      allow read: if false;
+    }
+  }
+}

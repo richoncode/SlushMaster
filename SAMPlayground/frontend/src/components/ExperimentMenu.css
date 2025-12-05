@@ -1,0 +1,48 @@
+.experiment-menu {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 2rem;
+    width: 100%;
+}
+
+.experiment-card {
+    background: #242424;
+    border-radius: 12px;
+    padding: 2rem;
+    text-align: left;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    border: 1px solid #333;
+}
+
+.experiment-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+    border-color: #646cff;
+}
+
+.experiment-card.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.experiment-card.disabled:hover {
+    transform: none;
+    box-shadow: none;
+    border-color: #333;
+}
+
+.experiment-icon {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+}
+
+.experiment-card h3 {
+    margin: 0 0 0.5rem 0;
+    font-size: 1.5rem;
+}
+
+.experiment-card p {
+    margin: 0;
+    color: #aaa;
+}

@@ -1,54 +1,13 @@
-# SlushMaster5000 Walkthrough
+# Slider UI Refinements
 
-I have successfully built the **SlushMaster5000**, a web application for personal slush machine owners.
+## Changes
+- Modified `src/index.css` to update slider handle styles.
+- Changed handle color to orange (`bg-orange-500`, `border-orange-600`).
+- Implemented hover-only visibility for handles using `opacity-0` by default and `opacity-100` on hover.
 
-## Features Implemented
+## Verification
+- Verified that `Slushometer.jsx` uses the `.slider-thumb` class which these styles target.
+- Verified that no other components use `type="range"` without this class (grep search returned only `Slushometer.jsx`).
 
-### 1. Slushometer 3000
-A calculator that determines if your mix will freeze correctly based on sugar and alcohol content.
-- **Inputs**: Volume, Sugar (g), Alcohol (oz/ABV).
-- **Logic**: Calculates Brix (Sugar %) and Final ABV.
-- **Feedback**: Visual indicators (Green/Yellow/Red) and actionable advice (e.g., "Add more sugar").
-
-### 2. Recipe Database
-A curated list of 5 starter recipes including:
-- **Classic**: Cola Slush, Blue Raspberry.
-- **Spiked**: Frozen Margarita, Piña Colada.
-- **Creamy**: Frozen Coffee.
-
-### 3. Modern UI
-- Built with **React + Vite**.
-- Styled with **Tailwind CSS** using a "glassmorphism" aesthetic (gradients, blur effects).
-- Responsive design for mobile and desktop.
-
-## Verification Results
-
-### Automated Tests
-Ran `vitest` on the calculator logic:
-```
-✓ src/utils/slushCalculator.test.js (4 tests)
-  ✓ slushCalculator > should identify perfect slush conditions
-  ✓ slushCalculator > should warn if sugar is too low (Ice Block)
-  ✓ slushCalculator > should warn if alcohol is too high
-  ✓ slushCalculator > should handle standard margarita ratio
-```
-
-### Build Verification
-Ran `npm run build` to ensure production readiness:
-```
-✓ built in 724ms
-dist/index.html                   0.46 kB
-dist/assets/index-CODd6Ng7.css   15.06 kB
-dist/assets/index-cizNQbDl.js   202.86 kB
-```
-
-## How to Run
-1.  Navigate to the project: `cd SlushMaster5000`
-2.  Start the dev server: `npm run dev`
-3.  Open the URL shown (usually `http://localhost:5173`)
-
-## Browser Verification
-I have automatically verified that the application launches and the Slushometer works.
-
-![App Launch Recording](/Users/richardbailey/.gemini/antigravity/brain/2c1b4a40-933c-467c-9d63-648f2e889026/launch_slushmaster_1763611020291.webp)
-
+## Visuals
+(Please verify in the browser that the sliders in the "Slushometer" section now have invisible handles that appear as orange circles when you hover over the slider track.)

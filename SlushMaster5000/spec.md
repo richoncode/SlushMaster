@@ -55,10 +55,20 @@ A companion app for slushie machine owners to find safe recipes and calculate if
 *   Save custom recipes.
 *   Notes on texture/results (e.g., "Froze in 20 mins").
 
+#### 4. Ingredient Filter (Pantry Mode)
+*   **Input**: User enters ingredients they have (e.g., "Cola", "Rum").
+*   **Logic**: Show recipes that contain *at least one* of the entered ingredients (or maybe *all*? "Might be able to make" suggests broad matching, but "What can I make with X" usually implies X is the main ingredient).
+*   **Refined Logic**:
+    *   Allow multiple search terms.
+    *   Filter recipes where *any* of the recipe's ingredients match *any* of the user's terms.
+    *   **Synonym Matching**: Map common terms (e.g., "Coke" -> "Cola", "Soda" -> "Pop").
+    *   Highlight matching recipes.
+
 ### User Flow
 1.  **Home**: Quick access to "Slushometer" and "Trending Recipes".
 2.  **Calculator**: Simple form -> Result Gauge.
 3.  **Recipe Detail**: Ingredients -> "Scale Recipe" (16oz, 32oz, 64oz).
+4.  **Recipe List**: Search bar at top -> "Filter by Ingredient".
 
 ### Technical Considerations
 *   **Platform**: Web App (PWA capable).

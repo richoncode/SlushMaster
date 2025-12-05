@@ -24,7 +24,7 @@ export default function Slushometer() {
                     <input
                         type="range" min="16" max="64" step="1"
                         value={volume} onChange={(e) => setVolume(Number(e.target.value))}
-                        className="w-full accent-blue-400"
+                        className="w-full slider-thumb"
                     />
                     <div className="text-right text-white font-mono">{volume} oz</div>
                 </div>
@@ -35,7 +35,7 @@ export default function Slushometer() {
                     <input
                         type="range" min="0" max="300" step="5"
                         value={sugar} onChange={(e) => setSugar(Number(e.target.value))}
-                        className="w-full accent-pink-400"
+                        className="w-full slider-thumb"
                     />
                     <div className="text-right text-white font-mono">{sugar}g</div>
                     <p className="text-xs text-blue-200 mt-1">Tip: A can of Coke has ~39g sugar.</p>
@@ -56,20 +56,22 @@ export default function Slushometer() {
                     {alcohol > 0 && (
                         <div className="pl-4 border-l-2 border-blue-400/50 space-y-3">
                             <div>
-                                <label className="block text-xs text-blue-100">Spirit Volume (oz)</label>
+                                <label className="block text-xs text-blue-100 mb-1">Spirit Volume (oz)</label>
                                 <input
-                                    type="number" min="0" max={volume}
+                                    type="range" min="0" max={volume} step="0.5"
                                     value={alcohol} onChange={(e) => setAlcohol(Number(e.target.value))}
-                                    className="w-full bg-black/20 border border-white/10 rounded px-2 py-1 text-white"
+                                    className="w-full slider-thumb"
                                 />
+                                <div className="text-right text-white font-mono text-sm">{alcohol} oz</div>
                             </div>
                             <div>
-                                <label className="block text-xs text-blue-100">Spirit ABV (%)</label>
+                                <label className="block text-xs text-blue-100 mb-1">Spirit ABV (%)</label>
                                 <input
-                                    type="number" min="0" max="100"
+                                    type="range" min="0" max="100" step="1"
                                     value={abv} onChange={(e) => setAbv(Number(e.target.value))}
-                                    className="w-full bg-black/20 border border-white/10 rounded px-2 py-1 text-white"
+                                    className="w-full slider-thumb"
                                 />
+                                <div className="text-right text-white font-mono text-sm">{abv}%</div>
                             </div>
                         </div>
                     )}
@@ -78,8 +80,8 @@ export default function Slushometer() {
                 {/* Results Display */}
                 {result && (
                     <div className={`mt-6 p-4 rounded-lg border ${result.color === 'green' ? 'bg-green-500/20 border-green-400/50' :
-                            result.color === 'red' ? 'bg-red-500/20 border-red-400/50' :
-                                'bg-yellow-500/20 border-yellow-400/50'
+                        result.color === 'red' ? 'bg-red-500/20 border-red-400/50' :
+                            'bg-yellow-500/20 border-yellow-400/50'
                         }`}>
                         <div className="text-center">
                             <div className="text-3xl mb-1">{result.color === 'green' ? '✅' : result.color === 'red' ? '🛑' : '⚠️'}</div>
