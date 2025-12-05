@@ -1,0 +1,177 @@
+.timeline {
+    margin-top: 2rem;
+    padding: 1.5rem;
+    background: #1a1a1a;
+    border-radius: 12px;
+    border: 1px solid #333;
+}
+
+.timeline h3 {
+    margin: 0 0 1.5rem 0;
+    font-size: 1.3rem;
+    color: #fff;
+    border-bottom: 2px solid #333;
+    padding-bottom: 0.75rem;
+}
+
+.timeline-empty {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: #666;
+}
+
+.timeline-empty p {
+    margin: 0.5rem 0;
+}
+
+.timeline-empty .hint {
+    font-size: 0.9rem;
+    color: #555;
+}
+
+.timeline-entries {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+
+.timeline-entry {
+    display: flex;
+    gap: 1rem;
+    position: relative;
+}
+
+.timeline-entry:not(:last-child)::before {
+    content: '';
+    position: absolute;
+    left: 11px;
+    top: 28px;
+    width: 2px;
+    height: calc(100% + 1.25rem);
+    background: #333;
+}
+
+.timeline-marker {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-top: 4px;
+    border: 3px solid #1a1a1a;
+    background: #666;
+    position: relative;
+    z-index: 1;
+}
+
+.timeline-marker.video {
+    background: #4CAF50;
+    box-shadow: 0 0 10px rgba(76, 175, 80, 0.4);
+}
+
+.timeline-marker.bounds {
+    background: #2196F3;
+    box-shadow: 0 0 10px rgba(33, 150, 243, 0.4);
+}
+
+.timeline-marker.players {
+    background: #FF9800;
+    box-shadow: 0 0 10px rgba(255, 152, 0, 0.4);
+}
+
+.timeline-marker.segmentation {
+    background: #9C27B0;
+    box-shadow: 0 0 10px rgba(156, 39, 176, 0.4);
+}
+
+.timeline-marker.error {
+    background: #F44336;
+    box-shadow: 0 0 10px rgba(244, 67, 54, 0.4);
+}
+
+.timeline-marker.default {
+    background: #666;
+}
+
+.timeline-content {
+    flex: 1;
+    background: #242424;
+    padding: 1rem;
+    border-radius: 8px;
+    border: 1px solid #333;
+}
+
+.timeline-entry.error .timeline-content {
+    background: rgba(244, 67, 54, 0.05);
+    border-color: rgba(244, 67, 54, 0.3);
+}
+
+.timeline-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.timeline-title {
+    font-weight: 600;
+    color: #fff;
+    font-size: 1rem;
+}
+
+.timeline-time {
+    font-size: 0.85rem;
+    color: #888;
+    font-family: 'Courier New', monospace;
+}
+
+.timeline-details {
+    color: #ccc;
+    font-size: 0.9rem;
+}
+
+.timeline-details p {
+    margin: 0.5rem 0;
+}
+
+.timeline-details .meta {
+    color: #888;
+    font-size: 0.85rem;
+}
+
+.timeline-details.error {
+    color: #ff6666;
+}
+
+.player-counts {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.count-badge {
+    display: inline-block;
+    background: #333;
+    padding: 0.4rem 0.8rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    color: #fff;
+    border: 1px solid #444;
+}
+
+.result-thumbnail {
+    max-width: 100%;
+    border-radius: 6px;
+    margin: 0.5rem 0;
+    border: 1px solid #333;
+}
+
+.error-stack {
+    background: #1a1a1a;
+    padding: 0.75rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    color: #ff8888;
+    overflow-x: auto;
+    margin-top: 0.5rem;
+    border: 1px solid #333;
+}

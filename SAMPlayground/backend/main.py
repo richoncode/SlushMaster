@@ -9,6 +9,7 @@ import torch
 import numpy as np
 from ultralytics import YOLO
 from pydantic import BaseModel
+import backend.experiment_db as experiment_db
 # Try importing SAM 2, handle if not installed yet (during dev)
 try:
     from sam2.build_sam import build_sam2_video_predictor, build_sam2
@@ -90,7 +91,7 @@ def init_sam2():
 
 @app.get("/")
 async def root():
-    return {"message": "SAMPlayground Backend is running"}
+    return {"message": "Richard's Playground Backend is running"}
 
 @app.get("/health")
 async def health_check():
@@ -798,3 +799,73 @@ async def get_segment_progress(filename: str):
         "total_frames": 0,
         "percent": 0
     }
+
+# ===== EXPERIMENT MANAGEMENT ENDPOINTS =====
+
+@app.post("/experiments")
+async def create_experiment(request: dict):
+    """Create a new experiment"""
+    name = request.get('name', 'unnamed experiment')
+    experiment_id = experiment_db.create_experiment(name)
+    experiment = experiment_db.get_experiment(experiment_id)
+    return experiment
+
+@app.get("/experiments")
+async def list_experiments():
+    """List all experiments"""
+    experiments = experiment_db.get_all_experiments()
+    return {"experiments": experiments}
+
+@app.get("/experiments/{experiment_id}")
+async def get_experiment(experiment_id: int):
+    """Get experiment details with full timeline"""
+    experiment = experiment_db.get_experiment(experiment_id)
+    if not experiment:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+    return experiment
+
+@app.put("/experiments/{experiment_id}/name")
+async def update_experiment_name(experiment_id: int, request: dict):
+    """Update experiment name"""
+    name = request.get('name')
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required")
+    
+    success = experiment_db.update_experiment_name(experiment_id, name)
+    if not success:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+    
+    return {"success": True, "experiment_id": experiment_id, "name": name}
+
+@app.delete("/experiments/{experiment_id}")
+async def delete_experiment(experiment_id: int):
+    """Delete an experiment"""
+    success = experiment_db.delete_experiment(experiment_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Experiment not found")
+    return {"success": True}
+
+@app.post("/experiments/{experiment_id}/timeline")
+async def add_timeline_entry(experiment_id: int, request: dict):
+    """Add a timeline entry to an experiment"""
+    step_type = request.get('step_type')
+    data = request.get('data', {})
+    
+    if not step_type:
+        raise HTTPException(status_code=400, detail="step_type is required")
+    
+    entry_id = experiment_db.add_timeline_entry(experiment_id, step_type, data)
+    return {"success": True, "entry_id": entry_id}
+
+@app.post("/experiments/{experiment_id}/video")
+async def add_experiment_video(experiment_id: int, request: dict):
+    """Add a video reference to an experiment"""
+    video_url = request.get('video_url')
+    video_type = request.get('video_type', 'uploaded')
+    
+    if not video_url:
+        raise HTTPException(status_code=400, detail="video_url is required")
+    
+    video_id = experiment_db.add_video(experiment_id, video_url, video_type)
+    return {"success": True, "video_id": video_id}
+

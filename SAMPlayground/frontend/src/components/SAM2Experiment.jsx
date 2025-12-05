@@ -1,13 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react'
 import VideoUploader from './VideoUploader'
 import ErrorBoundary from './ErrorBoundary'
+import SequentialResults from './SequentialResults'
 import './SAM2Experiment.css'
 
-function SAM2Experiment() {
+function SAM2Experiment({ experimentId }) {
+    const [experiment, setExperiment] = useState(null)
+    const [experimentName, setExperimentName] = useState('unnamed experiment')
+    const [editingName, setEditingName] = useState(false)
     const [videoUrl, setVideoUrl] = useState(null)
-    const [currentStep, setCurrentStep] = useState(0) // 0=upload, 1=corners, 2=players, 3=segment
+    // Removed currentStep - using timeline as source of truth
     const [frameData, setFrameData] = useState(null)
-    const [corners, setCorners] = useState({ top: [], bottom: [] })
+    const [bounds, setBounds] = useState({ top: [], bottom: [] })
     const [players, setPlayers] = useState({ top: [], bottom: [], similarity: 0 })
     const [segmentResult, setSegmentResult] = useState(null)
     const [isLoading, setIsLoading] = useState(false)
@@ -15,23 +19,151 @@ function SAM2Experiment() {
     const [fullVideoMessage, setFullVideoMessage] = useState('')
     const [fullVideoProgress, setFullVideoProgress] = useState(null) // {percent, message, status}
     const [fullVideoResult, setFullVideoResult] = useState(null) // Result URL when complete
-    const [results, setResults] = useState([]) // Accumulate results
     const [errorLog, setErrorLog] = useState([]) // Track all errors
-    const [draggingCorner, setDraggingCorner] = useState(null)
-    const [hoveredCorner, setHoveredCorner] = useState(null)
+    const [draggingBound, setDraggingBound] = useState(null)
+    const [hoveredBound, setHoveredBound] = useState(null)
     const canvasRef = useRef(null)
     const videoRef = useRef(null)
 
-    // Handle React errors from ErrorBoundary
-    const handleReactError = (errorData) => {
-        setErrorLog(prev => [...prev, errorData])
+    // Helper: Get latest timeline entry of a given type
+    const getLatestTimelineEntry = (stepType) => {
+        if (!experiment || !experiment.timeline) return null
+        return experiment.timeline.slice().reverse().find(entry => entry.step_type === stepType)
     }
 
-    // Step 1: Load video and detect field corners
-    const handleVideoLoaded = async (url) => {
+    // Helper: Check if a step has been completed
+    const hasCompletedStep = (stepType) => {
+        return getLatestTimelineEntry(stepType) !== null
+    }
+
+    // Helper: Determine what UI to show based on timeline
+    const shouldShowBoundsAdjustment = () => videoUrl && frameData
+    const shouldShowPlayerDetection = () => hasCompletedStep('video_loaded') || hasCompletedStep('bounds_adjusted')
+    const shouldShowSegmentation = () => hasCompletedStep('players_detected')
+
+    // Load experiment data
+    useEffect(() => {
+        if (experimentId) {
+            loadExperiment()
+        }
+    }, [experimentId])
+
+    const loadExperiment = async () => {
+        try {
+            const response = await fetch(`http://localhost:8000/experiments/${experimentId}`)
+            if (!response.ok) throw new Error('Failed to load experiment')
+            const data = await response.json()
+            setExperiment(data)
+            setExperimentName(data.name)
+
+            // Restore UI state from timeline
+            if (data.timeline && data.timeline.length > 0) {
+                // Find the latest video_loaded entry
+                const videoEntry = data.timeline.find(entry => entry.step_type === 'video_loaded')
+                if (videoEntry && videoEntry.data) {
+                    setVideoUrl(videoEntry.data.video_url)
+
+                    // Re-trigger video loading to get bounds
+                    const filename = videoEntry.data.video_url.split('/').pop()
+                    try {
+                        const boundsResponse = await fetch(`http://localhost:8000/detect-field-corners?filename=${filename}`, {
+                            method: 'POST'
+                        })
+                        if (boundsResponse.ok) {
+                            const boundsData = await boundsResponse.json()
+                            setFrameData(boundsData)
+
+                            // Check for bounds_adjusted entry or use detected bounds
+                            const boundsEntry = data.timeline.reverse().find(entry => entry.step_type === 'bounds_adjusted')
+                            if (boundsEntry && boundsEntry.data) {
+                                setBounds({
+                                    top: boundsEntry.data.top_corners || boundsData.top_corners,
+                                    bottom: boundsEntry.data.bottom_corners || boundsData.bottom_corners
+                                })
+                            } else {
+                                setBounds({ top: boundsData.top_corners, bottom: boundsData.bottom_corners })
+                            }
+
+                            // Check for player detection
+                            const playersEntry = data.timeline.reverse().find(entry => entry.step_type === 'players_detected')
+                            if (playersEntry && playersEntry.data) {
+                                // Player data available in timeline - UI will show based on timeline
+                                // Note: Full player bbox data is now stored in timeline
+                            }
+                            // UI state determined by timeline, not currentStep
+                        }
+                    } catch (error) {
+                        console.error('Error restoring video state:', error)
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Error loading experiment:', error)
+        }
+    }
+
+    const saveTimelineEntry = async (step_type, data) => {
+        try {
+            await fetch(`http://localhost:8000/experiments/${experimentId}/timeline`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ step_type, data })
+            })
+            loadExperiment() // Reload to get updated timeline
+        } catch (error) {
+            console.error('Error saving timeline entry:', error)
+        }
+    }
+
+    const updateExperimentName = async (newName) => {
+        try {
+            console.log('updateExperimentName called with:', newName)
+            const response = await fetch(`http://localhost:8000/experiments/${experimentId}/name`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: newName })
+            })
+            console.log('Response status:', response.status)
+            if (response.ok) {
+                const data = await response.json()
+                console.log('Response data:', data)
+                setExperimentName(newName)
+                loadExperiment()
+            } else {
+                console.error('Failed to update name, status:', response.status)
+            }
+        } catch (error) {
+            console.error('Error updating experiment name:', error)
+        }
+    }
+
+    const handleNameEdit = () => {
+        console.log('handleNameEdit called, current name:', experimentName)
+        const newName = prompt('Enter new experiment name:', experimentName)
+        console.log('User entered:', newName)
+        if (newName && newName.trim() && newName !== experimentName) {
+            console.log('Calling updateExperimentName with:', newName.trim())
+            updateExperimentName(newName.trim())
+        } else {
+            console.log('Name edit cancelled or unchanged')
+        }
+    }
+
+    // Step 1: Load video and detect axis-aligned field bounds
+    const handleVideoLoaded = async (url, videoType = 'uploaded') => {
         console.log('handleVideoLoaded called with url:', url)
         setVideoUrl(url)
         const filename = url.split('/').pop()
+
+        // Save video to experiment
+        await fetch(`http://localhost:8000/experiments/${experimentId}/video`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ video_url: url, video_type: videoType })
+        })
+
+        // Save timeline entry
+        await saveTimelineEntry('video_loaded', { video_url: url, video_name: filename, video_type: videoType })
 
         setIsLoading(true)
         console.log('Starting detect-field-corners request for:', filename)
@@ -44,33 +176,32 @@ function SAM2Experiment() {
 
             if (!response.ok) {
                 const errorText = await response.text()
-                const errorMsg = `Field corner detection failed: ${response.status} - ${errorText}`
+                const errorMsg = `Axis Aligned Field Bounds detection failed: ${response.status} - ${errorText}`
                 console.error(errorMsg)
-                setErrorLog(prev => [...prev, { timestamp: new Date().toLocaleTimeString(), message: errorMsg, stack: errorText }])
+                await saveTimelineEntry('error', { message: errorMsg, stack: errorText })
                 setIsLoading(false)
                 return
             }
 
             const data = await response.json()
-            console.log('Received field corner data:', data)
+            console.log('Received field bounds data:', data)
             setFrameData(data)
             console.log('Set frameData to:', data)
-            setCorners({ top: data.top_corners, bottom: data.bottom_corners })
-            console.log('Set corners:', { top: data.top_corners, bottom: data.bottom_corners })
-            setCurrentStep(1)
-            console.log('Set currentStep to 1')
+            setBounds({ top: data.top_corners, bottom: data.bottom_corners })
+            console.log('Set bounds:', { top: data.top_corners, bottom: data.bottom_corners })
+            // UI state now determined by timeline, not currentStep
         } catch (error) {
             const errorMsg = `Error loading video: ${error.message}`
             console.error(errorMsg, error)
-            setErrorLog(prev => [...prev, { timestamp: new Date().toLocaleTimeString(), message: errorMsg, stack: error.stack }])
+            await saveTimelineEntry('error', { message: errorMsg, stack: error.stack })
         }
         setIsLoading(false)
         console.log('handleVideoLoaded complete, isLoading set to false')
     }
 
-    // Draw corners on canvas
+    // Draw axis-aligned field bounds on canvas
     useEffect(() => {
-        if (currentStep === 1 && canvasRef.current && videoRef.current && frameData) {
+        if (shouldShowBoundsAdjustment() && canvasRef.current && videoRef.current && frameData) {
             const canvas = canvasRef.current
             const video = videoRef.current
             const ctx = canvas.getContext('2d')
@@ -80,42 +211,42 @@ function SAM2Experiment() {
 
             ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-            // Draw circles for corners
-            const drawCorner = (corner, color, label, isHovered) => {
+            // Draw circles for bound points
+            const drawBound = (bound, color, label, isHovered) => {
                 if (isHovered) {
                     // Hollow circle on hover
                     ctx.strokeStyle = color
                     ctx.lineWidth = 3
                     ctx.beginPath()
-                    ctx.arc(corner.x, corner.y, 15, 0, 2 * Math.PI)
+                    ctx.arc(bound.x, bound.y, 15, 0, 2 * Math.PI)
                     ctx.stroke()
                 } else {
                     // Filled circle
                     ctx.fillStyle = color
                     ctx.beginPath()
-                    ctx.arc(corner.x, corner.y, 10, 0, 2 * Math.PI)
+                    ctx.arc(bound.x, bound.y, 10, 0, 2 * Math.PI)
                     ctx.fill()
                 }
                 ctx.fillStyle = 'white'
                 ctx.font = '12px Arial'
-                ctx.fillText(label, corner.x + 15, corner.y + 5)
+                ctx.fillText(label, bound.x + 15, bound.y + 5)
             }
 
             // Blue for top (left eye), Red for bottom (right eye)
-            corners.top.forEach((c, i) => {
-                const isHovered = hoveredCorner && hoveredCorner.type === 'top' && hoveredCorner.index === i
-                drawCorner(c, 'blue', `L${i + 1}`, isHovered)
+            bounds.top.forEach((c, i) => {
+                const isHovered = hoveredBound && hoveredBound.type === 'top' && hoveredBound.index === i
+                drawBound(c, 'blue', `L${i + 1}`, isHovered)
             })
-            corners.bottom.forEach((c, i) => {
-                const isHovered = hoveredCorner && hoveredCorner.type === 'bottom' && hoveredCorner.index === i
-                drawCorner(c, 'red', `R${i + 1}`, isHovered)
+            bounds.bottom.forEach((c, i) => {
+                const isHovered = hoveredBound && hoveredBound.type === 'bottom' && hoveredBound.index === i
+                drawBound(c, 'red', `R${i + 1}`, isHovered)
             })
         }
-    }, [corners, currentStep, frameData, hoveredCorner])
+    }, [bounds, frameData, hoveredBound, videoUrl])
 
     // Handle corner dragging
     const handleMouseDown = (e) => {
-        if (currentStep !== 1 || !canvasRef.current) return
+        if (!shouldShowBoundsAdjustment() || !canvasRef.current) return
 
         const canvas = canvasRef.current
         const rect = canvas.getBoundingClientRect()
@@ -126,8 +257,8 @@ function SAM2Experiment() {
 
         // Find nearest corner
         const allCorners = [
-            ...corners.top.map((c, i) => ({ ...c, type: 'top', index: i })),
-            ...corners.bottom.map((c, i) => ({ ...c, type: 'bottom', index: i }))
+            ...bounds.top.map((c, i) => ({ ...c, type: 'top', index: i })),
+            ...bounds.bottom.map((c, i) => ({ ...c, type: 'bottom', index: i }))
         ]
 
         for (const corner of allCorners) {
@@ -149,20 +280,20 @@ function SAM2Experiment() {
         const x = (e.clientX - rect.left) * scaleX
         const y = (e.clientY - rect.top) * scaleY
 
-        if (draggingCorner) {
+        if (draggingBound) {
             // Dragging - update position
-            const newCorners = { ...corners }
-            if (draggingCorner.type === 'top') {
-                newCorners.top[draggingCorner.index] = { x: Math.round(x), y: Math.round(y) }
+            const newBounds = { ...corners }
+            if (draggingBound.type === 'top') {
+                newBounds.top[draggingBound.index] = { x: Math.round(x), y: Math.round(y) }
             } else {
-                newCorners.bottom[draggingCorner.index] = { x: Math.round(x), y: Math.round(y) }
+                newBounds.bottom[draggingBound.index] = { x: Math.round(x), y: Math.round(y) }
             }
-            setCorners(newCorners)
-        } else if (currentStep === 1) {
+            setBounds(newBounds)
+        } else if (shouldShowBoundsAdjustment()) {
             // Hovering - find nearest corner
             const allCorners = [
-                ...corners.top.map((c, i) => ({ ...c, type: 'top', index: i })),
-                ...corners.bottom.map((c, i) => ({ ...c, type: 'bottom', index: i }))
+                ...bounds.top.map((c, i) => ({ ...c, type: 'top', index: i })),
+                ...bounds.bottom.map((c, i) => ({ ...c, type: 'bottom', index: i }))
             ]
 
             let nearestCorner = null
@@ -178,17 +309,24 @@ function SAM2Experiment() {
     }
 
     const handleMouseLeave = () => {
-        setDraggingCorner(null)
-        setHoveredCorner(null)
+        setDraggingBound(null)
+        setHoveredBound(null)
     }
 
-    const handleMouseUp = () => {
-        setDraggingCorner(null)
+    const handleMouseUp = async () => {
+        if (draggingBound) {
+            // Save final bound positions to timeline
+            await saveTimelineEntry('bounds_adjusted', {
+                top_corners: bounds.top,
+                bottom_corners: bounds.bottom
+            })
+        }
+        setDraggingBound(null)
     }
 
     // Legacy handler - keeping for compatibility
     const legacyHandleMouseMove = (e) => {
-        if (!draggingCorner || !canvasRef.current) return
+        if (!draggingBound || !canvasRef.current) return
 
         const canvas = canvasRef.current
         const rect = canvas.getBoundingClientRect()
@@ -197,13 +335,13 @@ function SAM2Experiment() {
         const x = (e.clientX - rect.left) * scaleX
         const y = (e.clientY - rect.top) * scaleY
 
-        const newCorners = { ...corners }
-        if (draggingCorner.type === 'top') {
-            newCorners.top[draggingCorner.index] = { x: Math.round(x), y: Math.round(y) }
+        const newBounds = { ...corners }
+        if (draggingBound.type === 'top') {
+            newBounds.top[draggingBound.index] = { x: Math.round(x), y: Math.round(y) }
         } else {
-            newCorners.bottom[draggingCorner.index] = { x: Math.round(x), y: Math.round(y) }
+            newBounds.bottom[draggingBound.index] = { x: Math.round(x), y: Math.round(y) }
         }
-        setCorners(newCorners)
+        setBounds(newBounds)
     }
 
     // Step 2: Detect players
@@ -218,8 +356,8 @@ function SAM2Experiment() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     filename,
-                    top_corners: corners.top,
-                    bottom_corners: corners.bottom
+                    top_corners: bounds.top,
+                    bottom_corners: bounds.bottom
                 })
             })
 
@@ -236,19 +374,6 @@ function SAM2Experiment() {
             const data = await response.json()
             console.log('Detected players:', data)
 
-            // Always accumulate results, even with 0 detections
-            const now = new Date()
-            setResults(prev => [...prev, {
-                type: 'detection',
-                timestamp: now.toLocaleTimeString(),
-                data: {
-                    top_count: data.top_players?.length || 0,
-                    bottom_count: data.bottom_players?.length || 0,
-                    similarity: data.similarity || 0,
-                    metadata: data.metadata || {}
-                }
-            }])
-
             // Set players with safe defaults to prevent rendering errors
             setPlayers({
                 top: data.top_players || [],
@@ -257,8 +382,16 @@ function SAM2Experiment() {
                 metadata: data.metadata || {}
             })
 
-            // Only advance to step 2 if successful AND no errors
-            setCurrentStep(2)
+            // Save timeline entry with full player bbox data
+            await saveTimelineEntry('players_detected', {
+                top_count: data.top_players?.length || 0,
+                bottom_count: data.bottom_players?.length || 0,
+                similarity: data.similarity || 0,
+                top_players: data.top_players || [],
+                bottom_players: data.bottom_players || [],
+                metadata: data.metadata || {}
+            })
+
             setLoadingMessage('')
         } catch (error) {
             const errorMsg = `Error detecting players: ${error.message}`
@@ -273,7 +406,7 @@ function SAM2Experiment() {
 
     // Draw player bboxes
     useEffect(() => {
-        if (currentStep === 2 && canvasRef.current && videoRef.current) {
+        if (players.top.length > 0 && canvasRef.current && videoRef.current) {
             const canvas = canvasRef.current
             const video = videoRef.current
             const ctx = canvas.getContext('2d')
@@ -295,7 +428,7 @@ function SAM2Experiment() {
                 ctx.strokeRect(p.x1, p.y1, p.x2 - p.x1, p.y2 - p.y1)
             })
         }
-    }, [players, currentStep, frameData])
+    }, [players, frameData])
 
     // Step 3: Segment players
     const handleSegmentPlayers = async () => {
@@ -345,13 +478,12 @@ function SAM2Experiment() {
             setSegmentResult(data)
             setLoadingMessage('✓ First frame segmentation complete!')
 
-            // Accumulate results
-            const now = new Date()
-            setResults(prev => [...prev, {
-                type: 'segmentation',
-                timestamp: now.toLocaleString(),
-                data: data
-            }])
+            // Save timeline entry
+            await saveTimelineEntry('segmentation_completed', {
+                top_player_count: data.top_player_count,
+                bottom_player_count: data.bottom_player_count,
+                result_url: data.result_url
+            })
 
             // Clear loading message after short delay
             setTimeout(() => setLoadingMessage(''), 2000)
@@ -422,42 +554,56 @@ function SAM2Experiment() {
         }
     }
 
+    const formatDate = (isoString) => {
+        if (!isoString) return ''
+        const date = new Date(isoString)
+        return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit'
+        })
+    }
+
     return (
         <div className="sam2-experiment">
-            <h2>Stereo Soccer Field Player Segmentation</h2>
-            <p className="experiment-description">
-                Multi-step workflow for detecting and segmenting players in stereo soccer videos
-            </p>
+            {/* Experiment Header */}
+            <div className="experiment-header">
+                <div className="experiment-title-row">
+                    <h2 onClick={handleNameEdit} style={{ cursor: 'pointer' }} title="Click to edit">
+                        {experimentName}
+                    </h2>
+                    <button onClick={handleNameEdit} className="edit-name-button">✏️</button>
+                </div>
+                {experiment && (
+                    <p className="experiment-meta">
+                        Last updated: {formatDate(experiment.updated_at)}
+                    </p>
+                )}
+            </div>
 
             <div className="workspace">
-                {currentStep === 0 && (
+                {!videoUrl && (
                     <div className="upload-section">
-                        <VideoUploader onUploadComplete={handleVideoLoaded} />
-                        <div className="test-video-section">
-                            <p>Or try with a test video:</p>
+                        <h3>Load a Video</h3>
+                        <div className="video-selection-compact">
+                            <VideoUploader onUploadComplete={handleVideoLoaded} />
                             <button
                                 className="secondary-button"
-                                onClick={() => handleVideoLoaded('http://localhost:8000/video/usmnt-1min-2.mp4')}
+                                onClick={() => handleVideoLoaded('http://localhost:8000/video/usmnt-1min-2.mp4', 'test')}
                             >
-                                Load USMNT Soccer Clip
+                                🎬 USMNT Clip
                             </button>
                             <button
                                 className="secondary-button"
-                                onClick={() => handleVideoLoaded('http://localhost:8000/video/usmnt-1min-2_5s.mp4')}
+                                onClick={() => handleVideoLoaded('http://localhost:8000/video/usmnt-1min-2_5s.mp4', 'test')}
                             >
-                                Load 5‑sec Clip
+                                ⚡ 5-sec Clip
                             </button>
                         </div>
                     </div>
                 )}
 
-                {currentStep >= 1 && (
+                {videoUrl && (
                     <div className="video-section">
-                        <div className="step-indicator">
-                            <span className={currentStep >= 1 ? 'active' : ''}>1. Field Corners</span>
-                            <span className={currentStep >= 2 ? 'active' : ''}>2. Players</span>
-                            <span className={currentStep >= 3 ? 'active' : ''}>3. Segmentation</span>
-                        </div>
 
                         <div className="video-wrapper">
                             <video
@@ -465,15 +611,12 @@ function SAM2Experiment() {
                                 src={videoUrl}
                                 className="main-video"
                                 onLoadedMetadata={() => {
-                                    if (frameData) {
-                                        // This ensures canvas dimensions are set correctly after video metadata loads
-                                        // and triggers a re-render of corners/players if currentStep is 1 or 2
-                                        if (currentStep === 1) setCorners({ ...corners })
-                                        if (currentStep === 2) setPlayers({ ...players })
-                                    }
+                                    // Re-render when video loads
+                                    if (shouldShowBoundsAdjustment()) setBounds({ ...bounds })
+                                    if (players.top.length > 0) setPlayers({ ...players })
                                 }}
                                 // Keep video visible across steps
-                                style={{ display: currentStep < 3 ? 'block' : 'none' }}
+                                style={{ display: videoUrl && (shouldShowBoundsAdjustment() || players.top.length > 0) ? 'block' : 'none' }}
                             />
                             <canvas
                                 ref={canvasRef}
@@ -483,7 +626,7 @@ function SAM2Experiment() {
                                 onMouseUp={handleMouseUp}
                                 onMouseLeave={handleMouseLeave}
                                 // Keep canvas visible across steps where interaction/drawing is needed
-                                style={{ display: currentStep < 3 ? 'block' : 'none' }}
+                                style={{ display: videoUrl && (shouldShowBoundsAdjustment() || players.top.length > 0) ? 'block' : 'none' }}
                             />
                         </div>
 
@@ -495,257 +638,79 @@ function SAM2Experiment() {
                         )}
 
 
-                        {
-                            currentStep === 1 && (
-                                <div className="step-content">
-                                    <h3>Step 1: Adjust Field Corners</h3>
-                                    <p>Drag the circles to adjust field boundaries. Blue = Left (Top), Red = Right (Bottom).</p>
-                                    <div className="corner-coordinates">
-                                        <div className="corner-group">
-                                            <h4 style={{ color: 'blue' }}>Left (Top) Corners:</h4>
-                                            {corners.top.map((c, i) => (
-                                                <div key={i} className="coord-item">L{i + 1}: ({c.x}, {c.y})</div>
-                                            ))}
-                                        </div>
-                                        <div className="corner-group">
-                                            <h4 style={{ color: 'red' }}>Right (Bottom) Corners:</h4>
-                                            {corners.bottom.map((c, i) => (
-                                                <div key={i} className="coord-item">R{i + 1}: ({c.x}, {c.y})</div>
-                                            ))}
-                                        </div>
-                                    </div>
+                        {/* Action Buttons Panel */}
+                        {videoUrl && (
+                            <div className="action-panel">
+                                {shouldShowBoundsAdjustment() && !players.top.length && (
                                     <button
                                         className="primary-button"
                                         onClick={handleDetectPlayers}
                                         disabled={isLoading}
                                     >
-                                        {isLoading ? 'Processing...' : 'Detect Players →'}
+                                        {isLoading ? 'Detecting Players...' : 'Detect Players →'}
                                     </button>
-                                    {loadingMessage && !isLoading && (
-                                        <div className="error-message" style={{ marginTop: '1rem', padding: '1rem', background: '#2a1515', border: '2px solid #ff4444', borderRadius: '4px' }}>
-                                            <p style={{ color: '#ff6666', margin: 0 }}>{loadingMessage}</p>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                        {
-                            currentStep === 2 && (
-                                <div className="step-content">
-                                    <h3>Step 2: Player Detection</h3>
+                                )}
 
-                                    {/* Player Count Badges */}
-                                    <div className="player-count-badges">
-                                        <div className={`count-badge ${(players.top?.length || 0) > 0 ? 'has-players' : 'no-players'}`}>
-                                            <span className="badge-label">Left (Top)</span>
-                                            <span className="badge-count">{players.top?.length || 0}</span>
-                                            <span className="badge-text">players</span>
-                                        </div>
-                                        <div className={`count-badge ${(players.bottom?.length || 0) > 0 ? 'has-players' : 'no-players'}`}>
-                                            <span className="badge-label">Right (Bottom)</span>
-                                            <span className="badge-count">{players.bottom?.length || 0}</span>
-                                            <span className="badge-text">players</span>
-                                        </div>
-                                    </div>
-
-                                    {(players.top?.length || 0) === 0 && (players.bottom?.length || 0) === 0 ? (
-                                        <div className="no-detection-message">
-                                            <p>⚠️ No players detected in either view</p>
-                                            <p className="hint">Try adjusting the field corners to focus on the playing area, or check that players are visible in the video.</p>
-                                        </div>
-                                    ) : (
-                                        <div className="player-lists">
-                                            <div className="player-list">
-                                                <h4>Top View ({players.top?.length || 0} players)</h4>
-                                                <div className="player-items">
-                                                    {(players.top || []).map((p, i) => (
-                                                        <div key={i} className="player-item">
-                                                            Player {i + 1}: ({p.x1}, {p.y1}) → ({p.x2}, {p.y2}) [conf: {p.confidence?.toFixed(2)}]
-                                                        </div>
-                                                    ))}
-                                                    {(players.top?.length || 0) === 0 && <div className="empty-message">No players detected</div>}
-                                                </div>
-                                            </div>
-                                            <div className="player-list">
-                                                <h4>Bottom View ({players.bottom?.length || 0} players)</h4>
-                                                <div className="player-items">
-                                                    {(players.bottom || []).map((p, i) => (
-                                                        <div key={i} className="player-item">
-                                                            Player {i + 1}: ({p.x1}, {p.y1}) → ({p.x2}, {p.y2}) [conf: {p.confidence?.toFixed(2)}]
-                                                        </div>
-                                                    ))}
-                                                    {(players.bottom?.length || 0) === 0 && <div className="empty-message">No players detected</div>}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    <p>Similarity: {((players.similarity || 0) * 100).toFixed(0)}%</p>
+                                {players.top.length > 0 && !segmentResult && (
                                     <button
                                         className="primary-button"
                                         onClick={handleSegmentPlayers}
-                                        disabled={isLoading || ((players.top?.length || 0) === 0 && (players.bottom?.length || 0) === 0)}
+                                        disabled={isLoading}
                                     >
                                         {isLoading ? 'Segmenting...' : 'Segment First Frame →'}
                                     </button>
-                                    {((players.top?.length || 0) === 0 && (players.bottom?.length || 0) === 0) && (
-                                        <p className="hint">Segmentation requires at least one player detection</p>
-                                    )}
+                                )}
 
-                                    {/* Show progress/status */}
-                                    {loadingMessage && currentStep === 2 && (
-                                        <div className="status-message" style={{ marginTop: '1rem', padding: '1rem', background: isLoading ? '#1a1a2a' : '#2a1515', border: `2px solid ${isLoading ? '#646cff' : '#ff4444'}`, borderRadius: '4px' }}>
-                                            <p style={{ color: isLoading ? '#8888ff' : '#ff6666', margin: 0 }}>{loadingMessage}</p>
-                                        </div>
-                                    )}
-
-                                    {/* Show input data summary */}
-                                    {!isLoading && !segmentResult && ((players.top?.length || 0) > 0 || (players.bottom?.length || 0) > 0) ? (
-                                        <div className="input-summary" style={{ marginTop: '1rem', padding: '0.75rem', background: '#1a1a1a', border: '1px solid #333', borderRadius: '4px', fontSize: '0.85rem' }}>
-                                            <p style={{ margin: '0.25rem 0', color: '#888' }}>Ready to segment:</p>
-                                            <p style={{ margin: '0.25rem 0', color: '#ccc' }}>• Top view: {(players.top || []).length} players</p>
-                                            <p style={{ margin: '0.25rem 0', color: '#ccc' }}>• Bottom view: {(players.bottom || []).length} players</p>
-                                        </div>
-                                    ) : null}
-
-                                    {/* Show segmentation result inline */}
-                                    {segmentResult && currentStep === 2 && (
-                                        <div className="segmentation-result" style={{ marginTop: '2rem' }}>
-                                            <h4>Segmentation Test Frame</h4>
-                                            <p style={{ fontSize: '0.9rem', color: '#888' }}>First frame with colored player masks</p>
-                                            <div className="result-image">
-                                                <img src={segmentResult.result_url} alt="Segmented test frame" style={{ maxWidth: '100%', borderRadius: '8px', border: '2px solid #333' }} />
-                                            </div>
-                                            <p>Top: {segmentResult.top_player_count} players | Bottom: {segmentResult.bottom_player_count} players</p>
-                                            <button
-                                                className="primary-button"
-                                                style={{ marginTop: '1rem' }}
-                                                onClick={handleSegmentFullVideo}
-                                                disabled={fullVideoProgress?.status === 'processing' || fullVideoProgress?.status === 'starting'}
-                                            >
-                                                {fullVideoProgress?.status === 'processing' || fullVideoProgress?.status === 'starting' ? 'Processing Full Video...' : 'Segment Full Video →'}
-                                            </button>
-
-                                            {/* Full Video Progress & Results Section */}
-                                            {fullVideoProgress && (
-                                                <div className="full-video-progress" style={{ marginTop: '1.5rem', padding: '1rem', background: '#1a1a1a', borderRadius: '8px', border: '1px solid #333', textAlign: 'left' }}>
-                                                    <h4 style={{ marginTop: 0, marginBottom: '1rem', borderBottom: '1px solid #333', paddingBottom: '0.5rem' }}>Full Video Segmentation Status</h4>
-
-                                                    {/* Progress Bar */}
-                                                    <div style={{ width: '100%', height: '10px', background: '#333', borderRadius: '5px', overflow: 'hidden', marginBottom: '0.5rem' }}>
-                                                        <div style={{
-                                                            width: `${fullVideoProgress.percent}%`,
-                                                            height: '100%',
-                                                            background: fullVideoProgress.status === 'error' ? '#ff4444' : '#646cff',
-                                                            transition: 'width 0.3s ease'
-                                                        }} />
-                                                    </div>
-
-                                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: '#ccc', marginBottom: '0.5rem' }}>
-                                                        <span>{fullVideoProgress.message}</span>
-                                                        <span>{fullVideoProgress.percent}%</span>
-                                                    </div>
-
-                                                    {/* Frame Counter */}
-                                                    {fullVideoProgress.total_frames > 0 && (
-                                                        <p style={{ fontSize: '0.8rem', color: '#888', margin: '0.2rem 0' }}>
-                                                            Frame: {fullVideoProgress.current_frame} / {fullVideoProgress.total_frames}
-                                                        </p>
-                                                    )}
-
-                                                    {/* Result Video */}
-                                                    {fullVideoResult && (
-                                                        <div style={{ marginTop: '1rem', borderTop: '1px solid #333', paddingTop: '1rem' }}>
-                                                            <p style={{ color: '#4caf50', fontWeight: 'bold', margin: '0 0 0.5rem 0' }}>✅ Processing Complete!</p>
-                                                            <video
-                                                                src={fullVideoResult}
-                                                                controls
-                                                                style={{ width: '100%', borderRadius: '4px', border: '1px solid #444' }}
-                                                            />
-                                                            <div style={{ marginTop: '0.5rem' }}>
-                                                                <a href={fullVideoResult} download className="secondary-button" style={{ display: 'inline-block', textDecoration: 'none', fontSize: '0.9rem', padding: '0.5rem 1rem' }}>
-                                                                    Download Segmented Video
-                                                                </a>
-                                                            </div>
-                                                        </div>
-                                                    )}
-
-                                                    {/* Error Display */}
-                                                    {fullVideoProgress.status === 'error' && (
-                                                        <div style={{ marginTop: '0.5rem', color: '#ff4444', padding: '0.5rem', background: 'rgba(255, 68, 68, 0.1)', borderRadius: '4px' }}>
-                                                            <p style={{ margin: 0 }}>❌ Processing Failed: {fullVideoProgress.error || 'Unknown error'}</p>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                            )
-                        }
-
-                        {
-                            currentStep === 3 && segmentResult && (
-                                <div className="step-content">
-                                    <h3>Step 3: Segmentation Result</h3>
-                                    <div className="result-image">
-                                        <img src={segmentResult.result_url} alt="Segmented frame" />
-                                    </div>
-                                    <p>Top: {segmentResult.top_player_count} players | Bottom: {segmentResult.bottom_player_count} players</p>
+                                {segmentResult && !fullVideoResult && (
                                     <button
-                                        className="secondary-button"
-                                        onClick={() => {
-                                            setCurrentStep(0)
-                                            setVideoUrl(null)
-                                            setCorners({ top: [], bottom: [] })
-                                            setPlayers({ top: [], bottom: [], similarity: 0 })
-                                            setSegmentResult(null)
-                                        }}
+                                        className="primary-button"
+                                        onClick={handleSegmentFullVideo}
+                                        disabled={fullVideoProgress?.status === 'processing'}
                                     >
-                                        Start Over
+                                        {fullVideoProgress?.status === 'processing' ? 'Processing...' : 'Segment Full Video →'}
                                     </button>
-                                </div>
-                            )
-                        }
+                                )}
 
-                        {
-                            results.length > 0 && (
-                                <div className="results-history">
-                                    <h3>Results History</h3>
-                                    {results.map((result, idx) => (
-                                        <div key={idx} className="result-item">
-                                            <span className="result-time">{result.timestamp}</span>
-                                            {result.type === 'detection' && (
-                                                <div>
-                                                    <p><strong>Detection Attempt:</strong></p>
-                                                    <p>Left (Top): {result.data.top_count} players | Right (Bottom): {result.data.bottom_count} players</p>
-                                                    <p>Similarity: {(result.data.similarity * 100).toFixed(0)}%</p>
-                                                    {result.data.metadata && (
-                                                        <div className="metadata">
-                                                            <p>Model: {result.data.metadata.model || 'N/A'}</p>
-                                                            <p>Confidence: {result.data.metadata.confidence_threshold || 'N/A'}</p>
-                                                            <p>Frame: {result.data.metadata.frame_size || 'N/A'}</p>
-                                                            {result.data.metadata.top_view && (
-                                                                <p>Left crop: {result.data.metadata.top_view.crop_size} ({result.data.metadata.top_view.detections} found)</p>
-                                                            )}
-                                                            {result.data.metadata.bottom_view && (
-                                                                <p>Right crop: {result.data.metadata.bottom_view.crop_size} ({result.data.metadata.bottom_view.detections} found)</p>
-                                                            )}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
-                                            {result.type === 'segmentation' && (
-                                                <div>
-                                                    <p><strong>Segmentation Result:</strong></p>
-                                                    <p>Top: {result.data.top_player_count} | Bottom: {result.data.bottom_player_count}</p>
-                                                    <img src={result.data.result_url} alt="Result" className="result-thumb" />
-                                                </div>
-                                            )}
+                                {/* Full Video Progress */}
+                                {fullVideoProgress && (
+                                    <div className="progress-display">
+                                        <div className="progress-bar">
+                                            <div
+                                                className="progress-fill"
+                                                style={{ width: `${fullVideoProgress.percent}%` }}
+                                            />
                                         </div>
-                                    ))}
-                                </div>
-                            )
-                        }
+                                        <div className="progress-text">
+                                            {fullVideoProgress.message} - {fullVideoProgress.percent}%
+                                        </div>
+                                        {fullVideoProgress.current_frame && (
+                                            <div className="progress-detail">
+                                                Frame {fullVideoProgress.current_frame} / {fullVideoProgress.total_frames}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* Full Video Result */}
+                                {fullVideoResult && (
+                                    <div className="video-result">
+                                        <h4>✅ Full Video Segmentation Complete</h4>
+                                        <video src={fullVideoResult} controls style={{ maxWidth: '100%', borderRadius: '8px' }} />
+                                        <a href={fullVideoResult} download className="secondary-button">
+                                            Download Segmented Video
+                                        </a>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Sequential Results - replaces both step sections and timeline */}
+                        <SequentialResults
+                            experiment={experiment}
+                            bounds={bounds}
+                            players={players}
+                            segmentResult={segmentResult}
+                        />
 
                         {
                             errorLog.length > 0 && (
