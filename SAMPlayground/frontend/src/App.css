@@ -19,6 +19,14 @@
 .back-button {
   margin-bottom: 2rem;
   align-self: flex-start;
+  color: #ffffff;
+  background-color: #333;
+  border: 1px solid #555;
+}
+
+.back-button:hover {
+  background-color: #444;
+  border-color: #666;
 }
 
 .experiment-container {
