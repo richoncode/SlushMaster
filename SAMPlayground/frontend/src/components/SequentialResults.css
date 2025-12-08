@@ -121,3 +121,48 @@
     color: #ff6666;
     margin: 0;
 }
+
+/* Added for detailed bounds display */
+.bounds-group {
+    flex: 1;
+    background: #222;
+    padding: 1rem;
+    border-radius: 6px;
+    border: 1px solid #333;
+}
+
+.bounds-group h5 {
+    margin: 0 0 0.5rem 0;
+    color: #888;
+    font-size: 0.9rem;
+    border-bottom: 1px solid #333;
+    padding-bottom: 0.25rem;
+}
+
+.coord-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.coord-tag {
+    background: #111;
+    color: #aaa;
+    font-size: 0.8rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid #333;
+    font-family: monospace;
+}
+
+.aabb-info {
+    font-size: 0.85rem;
+    color: #ccc;
+    background: #2a3a2a;
+    /* Slightly green tint for AABB */
+    padding: 0.5rem;
+    border-radius: 4px;
+    border: 1px solid #3a4a3a;
+    font-family: monospace;
+}

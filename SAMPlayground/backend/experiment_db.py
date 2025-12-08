@@ -215,11 +215,18 @@ def update_experiment_timestamp(experiment_id: int):
 def add_timeline_entry(
     experiment_id: int, 
     step_type: str, 
-    data: Optional[Dict[str, Any]] = None
+    data: Optional[Dict[str, Any]] = None,
+    replace_existing: bool = False
 ) -> int:
     """Add a timeline entry to an experiment"""
     conn = get_connection()
     cursor = conn.cursor()
+    
+    if replace_existing:
+        cursor.execute("""
+            DELETE FROM experiment_timeline 
+            WHERE experiment_id = ? AND step_type = ?
+        """, (experiment_id, step_type))
     
     now = datetime.now().isoformat()
     data_json = json.dumps(data) if data else None

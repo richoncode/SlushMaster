@@ -850,11 +850,12 @@ async def add_timeline_entry(experiment_id: int, request: dict):
     """Add a timeline entry to an experiment"""
     step_type = request.get('step_type')
     data = request.get('data', {})
+    replace = request.get('replace', False)
     
     if not step_type:
         raise HTTPException(status_code=400, detail="step_type is required")
     
-    entry_id = experiment_db.add_timeline_entry(experiment_id, step_type, data)
+    entry_id = experiment_db.add_timeline_entry(experiment_id, step_type, data, replace_existing=replace)
     return {"success": True, "entry_id": entry_id}
 
 @app.post("/experiments/{experiment_id}/video")

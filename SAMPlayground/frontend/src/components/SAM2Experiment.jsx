@@ -21,7 +21,9 @@ function SAM2Experiment({ experimentId }) {
     const [fullVideoResult, setFullVideoResult] = useState(null) // Result URL when complete
     const [errorLog, setErrorLog] = useState([]) // Track all errors
     const [draggingBound, setDraggingBound] = useState(null)
+    const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
     const [hoveredBound, setHoveredBound] = useState(null)
+    const [losPosition, setLosPosition] = useState(0.33) // 0 to 1, default 1/3 way down field
     const canvasRef = useRef(null)
     const videoRef = useRef(null)
 
@@ -102,12 +104,12 @@ function SAM2Experiment({ experimentId }) {
         }
     }
 
-    const saveTimelineEntry = async (step_type, data) => {
+    const saveTimelineEntry = async (step_type, data, options = {}) => {
         try {
             await fetch(`http://localhost:8000/experiments/${experimentId}/timeline`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ step_type, data })
+                body: JSON.stringify({ step_type, data, ...options })
             })
             loadExperiment() // Reload to get updated timeline
         } catch (error) {
@@ -235,25 +237,39 @@ function SAM2Experiment({ experimentId }) {
 
             ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-            // Draw circles for bound points
+            // Draw rings for bound points
             const drawBound = (bound, color, label, isHovered) => {
+                const innerRadius = 13.5 // 27px interior diameter => 13.5px radius
+                const strokeWidth = 11   // 11px exterior ring thickness
+                const outerRadius = innerRadius + (strokeWidth / 2) // Stroke is centered, so we need to adjust or use arc with proper line width
+
+                // We want a clear inner circle of 27px diameter
+                // And a colored ring of 11px thickness OUTSIDE that? 
+                // "11 pixel exteroro" usually means the ring width.
+                // To achieve "clear interior":
+
+                ctx.beginPath()
+                ctx.arc(bound.x, bound.y, innerRadius + (strokeWidth / 2), 0, 2 * Math.PI)
+                ctx.strokeStyle = color
+                ctx.lineWidth = strokeWidth
+                ctx.stroke()
+
+                // If hovered, maybe highlight the ring or add a white outline?
                 if (isHovered) {
-                    // Hollow circle on hover
-                    ctx.strokeStyle = color
-                    ctx.lineWidth = 3
+                    ctx.strokeStyle = 'white'
+                    ctx.lineWidth = 1
                     ctx.beginPath()
-                    ctx.arc(bound.x, bound.y, 15, 0, 2 * Math.PI)
+                    ctx.arc(bound.x, bound.y, innerRadius, 0, 2 * Math.PI) // Inner border
                     ctx.stroke()
-                } else {
-                    // Filled circle
-                    ctx.fillStyle = color
                     ctx.beginPath()
-                    ctx.arc(bound.x, bound.y, 10, 0, 2 * Math.PI)
-                    ctx.fill()
+                    ctx.arc(bound.x, bound.y, innerRadius + strokeWidth, 0, 2 * Math.PI) // Outer border
+                    ctx.stroke()
                 }
+
+                // Label
                 ctx.fillStyle = 'white'
-                ctx.font = '12px Arial'
-                ctx.fillText(label, bound.x + 15, bound.y + 5)
+                ctx.font = '14px Arial'
+                ctx.fillText(label, bound.x + 30, bound.y + 10)
             }
 
             // Blue for top (left eye), Red for bottom (right eye)
@@ -265,8 +281,76 @@ function SAM2Experiment({ experimentId }) {
                 const isHovered = hoveredBound && hoveredBound.type === 'bottom' && hoveredBound.index === i
                 drawBound(c, 'red', `R${i + 1}`, isHovered)
             })
+
+            // Draw Line of Scrimmage with Tapering
+            if (bounds.top.length === 4 && bounds.bottom.length === 4) {
+                // Helper to interpolate point
+                const lerp = (p1, p2, t) => ({
+                    x: p1.x + (p2.x - p1.x) * t,
+                    y: p1.y + (p2.y - p1.y) * t
+                })
+
+                // Helper to draw tapered line
+                const drawTaperedLine = (p1, p2, p3, p4) => {
+                    // p1-p2 is Far Edge (Top)
+                    // p4-p3 is Near Edge (Bottom)
+                    const farDist = Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2)
+                    const nearDist = Math.sqrt((p3.x - p4.x) ** 2 + (p3.y - p4.y) ** 2)
+
+                    // Ratio for tapering
+                    const ratio = farDist / nearDist
+
+                    const wNear = 11
+                    const wFar = 11 * ratio
+
+                    const lFar = lerp(p1, p2, losPosition)
+                    const lNear = lerp(p4, p3, losPosition)
+
+                    // Vector from Far to Near
+                    const dx = lNear.x - lFar.x
+                    const dy = lNear.y - lFar.y
+                    const len = Math.sqrt(dx * dx + dy * dy)
+                    const ux = dx / len
+                    const uy = dy / len
+
+                    // Perpendicular vector
+                    const nx = -uy
+                    const ny = ux
+
+                    ctx.beginPath()
+                    // Far end (Top)
+                    ctx.moveTo(lFar.x + nx * wFar / 2, lFar.y + ny * wFar / 2)
+                    ctx.lineTo(lFar.x - nx * wFar / 2, lFar.y - ny * wFar / 2)
+                    // Near end (Bottom)
+                    ctx.lineTo(lNear.x - nx * wNear / 2, lNear.y - ny * wNear / 2)
+                    ctx.lineTo(lNear.x + nx * wNear / 2, lNear.y + ny * wNear / 2)
+
+                    ctx.closePath()
+                    ctx.fillStyle = 'black'
+                    ctx.fill()
+                }
+
+                // Top View (Left Eye)
+                drawTaperedLine(bounds.top[0], bounds.top[1], bounds.top[2], bounds.top[3])
+
+                // Bottom View (Right Eye)
+                drawTaperedLine(bounds.bottom[0], bounds.bottom[1], bounds.bottom[2], bounds.bottom[3])
+            }
         }
-    }, [bounds, frameData, hoveredBound, videoUrl])
+    }, [bounds, frameData, hoveredBound, videoUrl, losPosition])
+
+    // Helper to calculate AABB
+    const getAABB = (points) => {
+        if (!points || points.length === 0) return null
+        const xs = points.map(p => p.x)
+        const ys = points.map(p => p.y)
+        return {
+            minX: Math.min(...xs),
+            maxX: Math.max(...xs),
+            minY: Math.min(...ys),
+            maxY: Math.max(...ys)
+        }
+    }
 
     // Handle corner dragging
     const handleMouseDown = (e) => {
@@ -285,10 +369,18 @@ function SAM2Experiment({ experimentId }) {
             ...bounds.bottom.map((c, i) => ({ ...c, type: 'bottom', index: i }))
         ]
 
+        // 100px touch area => 50px radius check
         for (const corner of allCorners) {
             const dist = Math.sqrt((x - corner.x) ** 2 + (y - corner.y) ** 2)
-            if (dist < 15) {
-                setDraggingCorner(corner)
+            if (dist < 50) {
+                setDraggingBound(corner)
+                // NEW: Store offset relative to the corner center
+                // If I click at (105, 105) and corner is at (100, 100), offset is (5, 5).
+                // During drag, if mouse moves to (115, 115), corner position = mouse (115, 115) - offset (5, 5) = (110, 110).
+                setDragOffset({
+                    x: x - corner.x,
+                    y: y - corner.y
+                })
                 break
             }
         }
@@ -306,11 +398,15 @@ function SAM2Experiment({ experimentId }) {
 
         if (draggingBound) {
             // Dragging - update position
-            const newBounds = { ...corners }
+            // Use stored offset so marker stays relative to mouse where clicked (no jumping)
+            const newX = x - dragOffset.x
+            const newY = y - dragOffset.y
+
+            const newBounds = { ...bounds }
             if (draggingBound.type === 'top') {
-                newBounds.top[draggingBound.index] = { x: Math.round(x), y: Math.round(y) }
+                newBounds.top[draggingBound.index] = { x: Math.round(newX), y: Math.round(newY) }
             } else {
-                newBounds.bottom[draggingBound.index] = { x: Math.round(x), y: Math.round(y) }
+                newBounds.bottom[draggingBound.index] = { x: Math.round(newX), y: Math.round(newY) }
             }
             setBounds(newBounds)
         } else if (shouldShowBoundsAdjustment()) {
@@ -323,12 +419,12 @@ function SAM2Experiment({ experimentId }) {
             let nearestCorner = null
             for (const corner of allCorners) {
                 const dist = Math.sqrt((x - corner.x) ** 2 + (y - corner.y) ** 2)
-                if (dist < 20) {
+                if (dist < 50) { // Increased hover radius to match hit area
                     nearestCorner = corner
                     break
                 }
             }
-            setHoveredCorner(nearestCorner)
+            setHoveredBound(nearestCorner)
         }
     }
 
@@ -339,11 +435,14 @@ function SAM2Experiment({ experimentId }) {
 
     const handleMouseUp = async () => {
         if (draggingBound) {
-            // Save final bound positions to timeline
+            // Save final bound positions to timeline with AABB
+            // NEW: Use replace: true to overwrite previous adjustment
             await saveTimelineEntry('bounds_adjusted', {
                 top_corners: bounds.top,
-                bottom_corners: bounds.bottom
-            })
+                bottom_corners: bounds.bottom,
+                top_aabb: getAABB(bounds.top),
+                bottom_aabb: getAABB(bounds.bottom)
+            }, { replace: true })
         }
         setDraggingBound(null)
     }
@@ -648,6 +747,13 @@ function SAM2Experiment({ experimentId }) {
                 {videoUrl && (
                     <div className="video-section">
 
+                        <SequentialResults
+                            experiment={experiment}
+                            bounds={bounds}
+                            players={players}
+                            segmentResult={segmentResult}
+                        />
+
                         <div className="video-wrapper">
                             <video
                                 ref={videoRef}
@@ -681,13 +787,7 @@ function SAM2Experiment({ experimentId }) {
                         )}
 
 
-                        {/* Sequential Results - shows history of actions */}
-                        <SequentialResults
-                            experiment={experiment}
-                            bounds={bounds}
-                            players={players}
-                            segmentResult={segmentResult}
-                        />
+
 
                         {/* Action Buttons Panel - shows NEXT available action */}
                         {videoUrl && (
@@ -700,6 +800,24 @@ function SAM2Experiment({ experimentId }) {
                                     >
                                         {isLoading ? 'Detecting Players...' : 'Detect Players →'}
                                     </button>
+                                )}
+
+                                {shouldShowBoundsAdjustment() && (
+                                    <div className="los-control" style={{ marginTop: '1rem', padding: '0.5rem', background: '#333', borderRadius: '4px' }}>
+                                        <label htmlFor="los-slider" style={{ display: 'block', marginBottom: '0.5rem', color: '#ccc' }}>
+                                            Line of Scrimmage: {(losPosition * 100).toFixed(0)}%
+                                        </label>
+                                        <input
+                                            id="los-slider"
+                                            type="range"
+                                            min="0"
+                                            max="1"
+                                            step="0.001"
+                                            value={losPosition}
+                                            onChange={(e) => setLosPosition(parseFloat(e.target.value))}
+                                            style={{ width: '100%' }}
+                                        />
+                                    </div>
                                 )}
 
                                 {players.top.length > 0 && !segmentResult && (

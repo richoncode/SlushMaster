@@ -42,9 +42,35 @@ function SequentialResults({ experiment, bounds, players, segmentResult }) {
                             {duration && <span className="entry-duration">{duration}</span>}
                         </div>
                         <div className="entry-content">
-                            <div className="bounds-coords">
-                                <div>{entry.data.top_corners?.length || 0} left bounds</div>
-                                <div>{entry.data.bottom_corners?.length || 0} right bounds</div>
+                            <div className="bounds-group">
+                                <h5>Left Stereo View (Top)</h5>
+                                <div className="coord-list">
+                                    {(entry.data.top_corners || []).map((p, i) => (
+                                        <span key={i} className="coord-tag">p{i + 1}:({p.x}, {p.y})</span>
+                                    ))}
+                                </div>
+                                {entry.data.top_aabb && (
+                                    <div className="aabb-info">
+                                        <strong>AABB:</strong>
+                                        Min({entry.data.top_aabb.minX}, {entry.data.top_aabb.minY}) -
+                                        Max({entry.data.top_aabb.maxX}, {entry.data.top_aabb.maxY})
+                                    </div>
+                                )}
+                            </div>
+                            <div className="bounds-group" style={{ marginTop: '0.5rem' }}>
+                                <h5>Right Stereo View (Bottom)</h5>
+                                <div className="coord-list">
+                                    {(entry.data.bottom_corners || []).map((p, i) => (
+                                        <span key={i} className="coord-tag">p{i + 1}:({p.x}, {p.y})</span>
+                                    ))}
+                                </div>
+                                {entry.data.bottom_aabb && (
+                                    <div className="aabb-info">
+                                        <strong>AABB:</strong>
+                                        Min({entry.data.bottom_aabb.minX}, {entry.data.bottom_aabb.minY}) -
+                                        Max({entry.data.bottom_aabb.maxX}, {entry.data.bottom_aabb.maxY})
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
