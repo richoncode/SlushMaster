@@ -24,6 +24,7 @@ function SAM2Experiment({ experimentId }) {
     const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
     const [hoveredBound, setHoveredBound] = useState(null)
     const [losPosition, setLosPosition] = useState(0.33) // 0 to 1, default 1/3 way down field
+    const [playerViewMode, setPlayerViewMode] = useState('bounds') // 'bounds' or 'occlude'
     const canvasRef = useRef(null)
     const videoRef = useRef(null)
 
@@ -169,6 +170,52 @@ function SAM2Experiment({ experimentId }) {
         }
     }
 
+    // Helpers
+    const getAABB = (points) => {
+        if (!points || points.length === 0) return null
+        const xs = points.map(p => p.x)
+        const ys = points.map(p => p.y)
+        return {
+            minX: Math.min(...xs),
+            maxX: Math.max(...xs),
+            minY: Math.min(...ys),
+            maxY: Math.max(...ys)
+        }
+    }
+
+    const calculateLOSPolygon = (p1, p2, p3, p4, t) => {
+        const lerp = (a, b, t) => ({
+            x: a.x + (b.x - a.x) * t,
+            y: a.y + (b.y - a.y) * t
+        })
+
+        const farDist = Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2)
+        const nearDist = Math.sqrt((p3.x - p4.x) ** 2 + (p3.y - p4.y) ** 2)
+
+        const ratio = farDist / nearDist
+        const wNear = 11
+        const wFar = 11 * ratio
+
+        const lFar = lerp(p1, p2, t)
+        const lNear = lerp(p4, p3, t)
+
+        const dx = lNear.x - lFar.x
+        const dy = lNear.y - lFar.y
+        const len = Math.sqrt(dx * dx + dy * dy)
+        const ux = dx / len
+        const uy = dy / len
+
+        const nx = -uy
+        const ny = ux
+
+        return [
+            { x: lFar.x + nx * wFar / 2, y: lFar.y + ny * wFar / 2 }, // Top-Left
+            { x: lFar.x - nx * wFar / 2, y: lFar.y - ny * wFar / 2 }, // Top-Right
+            { x: lNear.x - nx * wNear / 2, y: lNear.y - ny * wNear / 2 }, // Bottom-Right
+            { x: lNear.x + nx * wNear / 2, y: lNear.y + ny * wNear / 2 }  // Bottom-Left
+        ]
+    }
+
     // Step 1: Load video and detect axis-aligned field bounds
     const handleVideoLoaded = async (url, videoType = 'uploaded') => {
         console.log('handleVideoLoaded called with url:', url)
@@ -213,7 +260,9 @@ function SAM2Experiment({ experimentId }) {
             // Save initial bounds to timeline so they persist
             await saveTimelineEntry('bounds_adjusted', {
                 top_corners: data.top_corners,
-                bottom_corners: data.bottom_corners
+                bottom_corners: data.bottom_corners,
+                top_aabb: getAABB(data.top_corners),
+                bottom_aabb: getAABB(data.bottom_corners)
             })
             // UI state now determined by timeline, not currentStep
         } catch (error) {
@@ -283,74 +332,69 @@ function SAM2Experiment({ experimentId }) {
             })
 
             // Draw Line of Scrimmage with Tapering
+            // Draw Line of Scrimmage with Tapering
             if (bounds.top.length === 4 && bounds.bottom.length === 4) {
-                // Helper to interpolate point
-                const lerp = (p1, p2, t) => ({
-                    x: p1.x + (p2.x - p1.x) * t,
-                    y: p1.y + (p2.y - p1.y) * t
-                })
-
-                // Helper to draw tapered line
-                const drawTaperedLine = (p1, p2, p3, p4) => {
-                    // p1-p2 is Far Edge (Top)
-                    // p4-p3 is Near Edge (Bottom)
-                    const farDist = Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2)
-                    const nearDist = Math.sqrt((p3.x - p4.x) ** 2 + (p3.y - p4.y) ** 2)
-
-                    // Ratio for tapering
-                    const ratio = farDist / nearDist
-
-                    const wNear = 11
-                    const wFar = 11 * ratio
-
-                    const lFar = lerp(p1, p2, losPosition)
-                    const lNear = lerp(p4, p3, losPosition)
-
-                    // Vector from Far to Near
-                    const dx = lNear.x - lFar.x
-                    const dy = lNear.y - lFar.y
-                    const len = Math.sqrt(dx * dx + dy * dy)
-                    const ux = dx / len
-                    const uy = dy / len
-
-                    // Perpendicular vector
-                    const nx = -uy
-                    const ny = ux
-
+                const drawPolygon = (points) => {
                     ctx.beginPath()
-                    // Far end (Top)
-                    ctx.moveTo(lFar.x + nx * wFar / 2, lFar.y + ny * wFar / 2)
-                    ctx.lineTo(lFar.x - nx * wFar / 2, lFar.y - ny * wFar / 2)
-                    // Near end (Bottom)
-                    ctx.lineTo(lNear.x - nx * wNear / 2, lNear.y - ny * wNear / 2)
-                    ctx.lineTo(lNear.x + nx * wNear / 2, lNear.y + ny * wNear / 2)
-
+                    ctx.moveTo(points[0].x, points[0].y)
+                    for (let i = 1; i < points.length; i++) {
+                        ctx.lineTo(points[i].x, points[i].y)
+                    }
                     ctx.closePath()
                     ctx.fillStyle = 'black'
                     ctx.fill()
                 }
 
                 // Top View (Left Eye)
-                drawTaperedLine(bounds.top[0], bounds.top[1], bounds.top[2], bounds.top[3])
+                const topLOS = calculateLOSPolygon(bounds.top[0], bounds.top[1], bounds.top[2], bounds.top[3], losPosition)
+                drawPolygon(topLOS)
 
                 // Bottom View (Right Eye)
-                drawTaperedLine(bounds.bottom[0], bounds.bottom[1], bounds.bottom[2], bounds.bottom[3])
+                const bottomLOS = calculateLOSPolygon(bounds.bottom[0], bounds.bottom[1], bounds.bottom[2], bounds.bottom[3], losPosition)
+                drawPolygon(bottomLOS)
+            }
+
+            // Draw player bboxes if present (merged loop)
+            if (players.top.length > 0) {
+                if (playerViewMode === 'bounds') {
+                    ctx.strokeStyle = 'yellow'
+                    ctx.lineWidth = 3
+
+                    players.top.forEach(p => {
+                        ctx.strokeRect(p.x1, p.y1, p.x2 - p.x1, p.y2 - p.y1)
+                    })
+
+                    players.bottom.forEach(p => {
+                        ctx.strokeRect(p.x1, p.y1, p.x2 - p.x1, p.y2 - p.y1)
+                    })
+                } else if (playerViewMode === 'occlude') {
+                    // Erase LOS behind players
+                    ctx.save()
+                    ctx.globalCompositeOperation = 'destination-out'
+                    ctx.fillStyle = 'black' // Color doesn't matter for destination-out
+
+                    const drawOcclusion = (p) => {
+                        const width = p.x2 - p.x1
+                        const height = p.y2 - p.y1
+                        const cx = p.x1 + width / 2
+                        const cy = p.y1 + height / 2
+
+                        ctx.beginPath()
+                        ctx.ellipse(cx, cy, width / 2, height / 2, 0, 0, 2 * Math.PI)
+                        ctx.fill()
+                    }
+
+                    players.top.forEach(drawOcclusion)
+                    players.bottom.forEach(drawOcclusion)
+
+                    ctx.restore()
+                }
+                // If 'hide', do nothing
             }
         }
-    }, [bounds, frameData, hoveredBound, videoUrl, losPosition])
+    }, [bounds, frameData, hoveredBound, videoUrl, losPosition, players, playerViewMode])
 
-    // Helper to calculate AABB
-    const getAABB = (points) => {
-        if (!points || points.length === 0) return null
-        const xs = points.map(p => p.x)
-        const ys = points.map(p => p.y)
-        return {
-            minX: Math.min(...xs),
-            maxX: Math.max(...xs),
-            minY: Math.min(...ys),
-            maxY: Math.max(...ys)
-        }
-    }
+
 
     // Handle corner dragging
     const handleMouseDown = (e) => {
@@ -532,31 +576,8 @@ function SAM2Experiment({ experimentId }) {
         }
     }
 
-    // Draw player bboxes
-    useEffect(() => {
-        if (players.top.length > 0 && canvasRef.current && videoRef.current) {
-            const canvas = canvasRef.current
-            const video = videoRef.current
-            const ctx = canvas.getContext('2d')
+    // Draw player drawing logic merged into main useEffect at top
 
-            canvas.width = video.videoWidth || frameData.frame_width
-            canvas.height = video.videoHeight || frameData.frame_height
-
-            ctx.clearRect(0, 0, canvas.width, canvas.height)
-
-            // Draw yellow boxes
-            ctx.strokeStyle = 'yellow'
-            ctx.lineWidth = 3 // Changed from 2 to 3
-
-            players.top.forEach(p => {
-                ctx.strokeRect(p.x1, p.y1, p.x2 - p.x1, p.y2 - p.y1)
-            })
-
-            players.bottom.forEach(p => {
-                ctx.strokeRect(p.x1, p.y1, p.x2 - p.x1, p.y2 - p.y1)
-            })
-        }
-    }, [players, frameData])
 
     // Step 3: Segment players
     const handleSegmentPlayers = async () => {
@@ -804,9 +825,71 @@ function SAM2Experiment({ experimentId }) {
 
                                 {shouldShowBoundsAdjustment() && (
                                     <div className="los-control" style={{ marginTop: '1rem', padding: '0.5rem', background: '#333', borderRadius: '4px' }}>
-                                        <label htmlFor="los-slider" style={{ display: 'block', marginBottom: '0.5rem', color: '#ccc' }}>
-                                            Line of Scrimmage: {(losPosition * 100).toFixed(0)}%
-                                        </label>
+                                        {/* View Mode Toggles */}
+                                        {players.top.length > 0 && (
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+                                                <span style={{ color: '#ccc', fontSize: '0.9rem', minWidth: '50px' }}>Players:</span>
+                                                <button
+                                                    onClick={() => setPlayerViewMode('bounds')}
+                                                    style={{
+                                                        flex: 1,
+                                                        padding: '4px',
+                                                        backgroundColor: playerViewMode === 'bounds' ? '#646cff' : '#444',
+                                                        border: 'none',
+                                                        borderRadius: '4px',
+                                                        color: 'white',
+                                                        cursor: 'pointer'
+                                                    }}
+                                                >
+                                                    Bounds
+                                                </button>
+                                                <button
+                                                    onClick={() => setPlayerViewMode('occlude')}
+                                                    style={{
+                                                        flex: 1,
+                                                        padding: '4px',
+                                                        backgroundColor: playerViewMode === 'occlude' ? '#646cff' : '#444',
+                                                        border: 'none',
+                                                        borderRadius: '4px',
+                                                        color: 'white',
+                                                        cursor: 'pointer'
+                                                    }}
+                                                >
+                                                    Occlude
+                                                </button>
+                                                <button
+                                                    onClick={() => setPlayerViewMode('hide')}
+                                                    style={{
+                                                        flex: 1,
+                                                        padding: '4px',
+                                                        backgroundColor: playerViewMode === 'hide' ? '#646cff' : '#444',
+                                                        border: 'none',
+                                                        borderRadius: '4px',
+                                                        color: 'white',
+                                                        cursor: 'pointer'
+                                                    }}
+                                                >
+                                                    Hide
+                                                </button>
+                                            </div>
+                                        )}
+
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                            <span style={{ color: '#ccc' }}>Line of Scrimmage: {(losPosition * 100).toFixed(1)}%</span>
+                                            {bounds.top.length === 4 && bounds.bottom.length === 4 && (
+                                                <span style={{ color: '#666', fontSize: '0.8rem' }}>
+                                                    {(() => {
+                                                        const topLOS = calculateLOSPolygon(bounds.top[0], bounds.top[1], bounds.top[2], bounds.top[3], losPosition)
+                                                        const bottomLOS = calculateLOSPolygon(bounds.bottom[0], bounds.bottom[1], bounds.bottom[2], bounds.bottom[3], losPosition)
+                                                        const topBox = getAABB(topLOS)
+                                                        const bottomBox = getAABB(bottomLOS)
+
+                                                        const fmt = (b) => `[${Math.round(b.minX)},${Math.round(b.minY)} - ${Math.round(b.maxX)},${Math.round(b.maxY)}]`
+                                                        return `L-LOS: ${fmt(topBox)}  R-LOS: ${fmt(bottomBox)}`
+                                                    })()}
+                                                </span>
+                                            )}
+                                        </div>
                                         <input
                                             id="los-slider"
                                             type="range"

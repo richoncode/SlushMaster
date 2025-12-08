@@ -288,49 +288,20 @@ def detect_field_corners(filename: str):
     
     height, width = frame.shape[:2]
     
-    # Split into top and bottom halves (stereo)
-    top_frame = frame[0:height//2, :]
-    bottom_frame = frame[height//2:, :]
-    
-    def detect_field_bounds(img, y_offset=0):
-        """Detect field corners using green color threshold"""
-        # Convert to HSV for green detection
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        
-        # Green field range (adjust as needed)
-        lower_green = np.array([35, 40, 40])
-        upper_green = np.array([85, 255, 255])
-        
-        mask = cv2.inRange(hsv, lower_green, upper_green)
-        
-        # Find contours
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        if not contours:
-            # Default to full frame
-            h, w = img.shape[:2]
-            return [
-                {"x": int(w * 0.1), "y": int(h * 0.1 + y_offset)},
-                {"x": int(w * 0.9), "y": int(h * 0.1 + y_offset)},
-                {"x": int(w * 0.9), "y": int(h * 0.9 + y_offset)},
-                {"x": int(w * 0.1), "y": int(h * 0.9 + y_offset)}
-            ]
-        
-        # Get largest contour (assumed to be field)
-        largest = max(contours, key=cv2.contourArea)
-        
-        # Get bounding rect and approximate corners
-        x, y, w, h = cv2.boundingRect(largest)
-        
-        return [
-            {"x": x, "y": y + y_offset},
-            {"x": x + w, "y": y + y_offset},
-            {"x": x + w, "y": y + h + y_offset},
-            {"x": x, "y": y + h + y_offset}
-        ]
-    
-    top_corners = detect_field_bounds(top_frame, 0)
-    bottom_corners = detect_field_bounds(bottom_frame, height//2)
+    # Hardcoded bounds provided by user
+    top_corners = [
+        {"x": 1198, "y": 875},
+        {"x": 2745, "y": 878},
+        {"x": 3350, "y": 1412},
+        {"x": 638, "y": 1412}
+    ]
+
+    bottom_corners = [
+        {"x": 1119, "y": 3037},
+        {"x": 2677, "y": 3040},
+        {"x": 3237, "y": 3575},
+        {"x": 515, "y": 3568}
+    ]
     
     return {
         "top_corners": top_corners,
