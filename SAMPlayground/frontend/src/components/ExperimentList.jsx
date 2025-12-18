@@ -33,12 +33,25 @@ function ExperimentList({ onSelectExperiment }) {
         }
     }
 
+    const generateDefaultName = () => {
+        const now = new Date()
+        const month = now.toLocaleString('default', { month: 'short' }).toLowerCase()
+        const day = now.getDate()
+        const time = now.toLocaleString('default', {
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true
+        }).toLowerCase().replace(' ', '')
+        return `${month} ${day} ${time}`
+    }
+
     const handleCreateExperiment = async () => {
         try {
+            const defaultName = generateDefaultName()
             const response = await fetch('http://localhost:8000/experiments', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: 'unnamed experiment' })
+                body: JSON.stringify({ name: defaultName })
             })
 
             if (!response.ok) {

@@ -310,13 +310,74 @@ def detect_field_corners(filename: str):
         "frame_height": height
     }
 
-@app.post("/detect-players")
-def detect_players(request: dict):
-    """Detect players within field bounds for both views"""
-    filename = request.get('filename')
-    top_corners = request.get('top_corners')
-    bottom_corners = request.get('bottom_corners')
+
+def calculate_los_aabb(p1, p2, p3, p4, t, margin=40):
+    """
+    Calculate AABB of the LOS polygon at position t, expanded by margin.
+    Replicates frontend logic.
+    Points are dicts {'x': val, 'y': val}.
+    """
+    import math
+
+    def lerp(a, b, t):
+        return {
+            'x': a['x'] + (b['x'] - a['x']) * t,
+            'y': a['y'] + (b['y'] - a['y']) * t
+        }
+
+    far_dist = math.sqrt((p2['x'] - p1['x'])**2 + (p2['y'] - p1['y'])**2)
+    near_dist = math.sqrt((p3['x'] - p4['x'])**2 + (p3['y'] - p4['y'])**2)
+
+    ratio = far_dist / near_dist if near_dist > 0 else 1.0
+    w_near = 11
+    w_far = 11 * ratio
+
+    l_far = lerp(p1, p2, t)
+    l_near = lerp(p4, p3, t)
+
+    dx = l_near['x'] - l_far['x']
+    dy = l_near['y'] - l_far['y']
+    length = math.sqrt(dx*dx + dy*dy)
     
+    if length == 0:
+        return None
+        
+    ux = dx / length
+    uy = dy / length
+
+    nx = -uy
+    ny = ux
+
+    # calculate polygon corners
+    poly = [
+        {'x': l_far['x'] + nx * w_far / 2, 'y': l_far['y'] + ny * w_far / 2},
+        {'x': l_far['x'] - nx * w_far / 2, 'y': l_far['y'] - ny * w_far / 2},
+        {'x': l_near['x'] - nx * w_near / 2, 'y': l_near['y'] - ny * w_near / 2},
+        {'x': l_near['x'] + nx * w_near / 2, 'y': l_near['y'] + ny * w_near / 2}
+    ]
+
+    xs = [p['x'] for p in poly]
+    ys = [p['y'] for p in poly]
+
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+
+    return {
+        'x1': min_x - margin,
+        'y1': min_y - margin,
+        'x2': max_x + margin,
+        'y2': max_y + margin
+    }
+
+@app.post("/detect-players")
+async def detect_players(request: dict):
+    """Detect players using YOLOv8 with different modes"""
+    filename = request.get('filename')
+    top_corners = request.get('top_corners', []) 
+    bottom_corners = request.get('bottom_corners', [])
+    detection_mode = request.get('detection_mode', 'fop')  # 'full', 'fop', 'los'
+    los_position = request.get('los_position', 0.5)
+
     video_path = UPLOAD_DIR / filename
     if not video_path.exists():
         raise HTTPException(status_code=404, detail="Video not found")
@@ -330,41 +391,80 @@ def detect_players(request: dict):
         raise HTTPException(status_code=500, detail="Failed to read video")
     
     height, width = frame.shape[:2]
+    top_frame = frame[0:height//2, :].copy()
+    bottom_frame = frame[height//2:, :].copy()
     
-    # Split into top and bottom
-    top_frame = frame[0:height//2, :]
-    bottom_frame = frame[height//2:, :]
-    
-    def detect_in_region(img, corners, y_offset=0, view_name=""):
-        """Run YOLO on cropped region with preprocessing"""
-        # Get bounding box from corners
-        xs = [c["x"] for c in corners]
-        ys = [c["y"] - y_offset for c in corners]
-        x1, x2 = min(xs), max(xs)
-        y1, y2 = min(ys), max(ys)
+    def detect_in_region(img, corners, y_offset, view_name):
+        # Determine detection region based on mode
+        region_corners = corners # Default to fop
         
-        # Crop
-        cropped = img[max(0, y1):min(img.shape[0], y2), max(0, x1):min(img.shape[1], x2)]
-        crop_height, crop_width = cropped.shape[:2]
+        if detection_mode == 'full':
+            h, w = img.shape[:2]
+            # Use full image bounds
+            region_corners = [
+                {'x': 0, 'y': 0},
+                {'x': w, 'y': 0},
+                {'x': w, 'y': h},
+                {'x': 0, 'y': h}
+            ]
+        elif detection_mode == 'los':
+             # corners are P1, P2, P3, P4
+             if len(corners) == 4:
+                 p1, p2, p3, p4 = corners[0], corners[1], corners[2], corners[3]
+                 aabb = calculate_los_aabb(p1, p2, p3, p4, los_position)
+                 
+                 if aabb:
+                     # Clamp to image bounds
+                     h, w = img.shape[:2]
+                     x1 = max(0, int(aabb['x1']))
+                     y1 = max(0, int(aabb['y1']))
+                     x2 = min(w, int(aabb['x2']))
+                     y2 = min(h, int(aabb['y2']))
+                     
+                     region_corners = [
+                         {'x': x1, 'y': y1},
+                         {'x': x2, 'y': y1},
+                         {'x': x2, 'y': y2},
+                         {'x': x1, 'y': y2}
+                     ]
+
+        # Convert simple list to numpy for boundingRect
+        points = np.array([[c["x"], c["y"]] for c in region_corners], dtype=np.int32)
+        x, y, w, h = cv2.boundingRect(points)
+        
+        # Ensure valid crop
+        x = max(0, x)
+        y = max(0, y)
+        w = min(w, img.shape[1] - x)
+        h = min(h, img.shape[0] - y)
+        
+        if w <= 0 or h <= 0:
+            return [], {"view": view_name, "error": "Invalid region"}
+
+        # Crop to bounding rect of region
+        cropped = img[y:y+h, x:x+w]
         
         # Preprocess: Enhance contrast and sharpness for better small object detection
         # Convert to LAB color space for better contrast control
-        lab = cv2.cvtColor(cropped, cv2.COLOR_BGR2LAB)
-        l, a, b = cv2.split(lab)
-        
-        # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) to L channel
-        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
-        l = clahe.apply(l)
-        
-        # Merge and convert back
-        enhanced = cv2.merge([l, a, b])
-        enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
-        
-        # Sharpen the image
-        kernel = np.array([[-1,-1,-1],
-                          [-1, 9,-1],
-                          [-1,-1,-1]])
-        sharpened = cv2.filter2D(enhanced, -1, kernel)
+        try:
+            lab = cv2.cvtColor(cropped, cv2.COLOR_BGR2LAB)
+            l, a, b = cv2.split(lab)
+            
+            # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) to L channel
+            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+            l = clahe.apply(l)
+            
+            # Merge and convert back
+            enhanced = cv2.merge([l, a, b])
+            enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
+            
+            # Sharpen the image
+            kernel = np.array([[-1,-1,-1],
+                            [-1, 9,-1],
+                            [-1,-1,-1]])
+            sharpened = cv2.filter2D(enhanced, -1, kernel)
+        except Exception:
+            sharpened = cropped # Fallback if empty
         
         # Run YOLO with very low confidence threshold for distant small objects
         model = get_yolo_model()
@@ -375,11 +475,35 @@ def detect_players(request: dict):
             for box in result.boxes:
                 if int(box.cls) == 0:  # person
                     xyxy = box.xyxy[0].cpu().numpy()
+                    
+                    # Transform back to original frame coordinates
+                    # xyxy is relative to crop
+                    
+                    global_x1 = int(xyxy[0] + x)
+                    global_y1 = int(xyxy[1] + y + y_offset)
+                    global_x2 = int(xyxy[2] + x)
+                    global_y2 = int(xyxy[3] + y + y_offset)
+                    
+                    # Center point for filtering
+                    cx = (global_x1 + global_x2) / 2
+                    cy = (global_y1 + global_y2) / 2
+                    
+                    # Logic to check if INSIDE the region_corners polygon
+                    # If mode is full or los (rect), boundingRect check is enough (which we did by cropping)
+                    # If mode is fop (trapezoid), we technically detect inside the boundingRect
+                    # In original code, it just cropped to boundingRect. 
+                    # If we want strict "within FOP", we should check point polygon test.
+                    # But the requirement implies comparing "approaches". 
+                    # Since existing code just cropped to boundingRect of corners, I will maintain that for consistency unless 'fop' implies strict poly check.
+                    # Actually, for 'los' (rect) and 'full' (rect), the crop is exact.
+                    # For 'fop' (trapezoid), crop includes some outside areas.
+                    # I will stick to crop-based detection for now as it's the established pattern.
+                    
                     players.append({
-                        "x1": int(xyxy[0] + x1),
-                        "y1": int(xyxy[1] + y1 + y_offset),
-                        "x2": int(xyxy[2] + x1),
-                        "y2": int(xyxy[3] + y1 + y_offset),
+                        "x1": global_x1,
+                        "y1": global_y1,
+                        "x2": global_x2,
+                        "y2": global_y2,
                         "confidence": float(box.conf[0])
                     })
         
@@ -388,7 +512,7 @@ def detect_players(request: dict):
         
         metadata = {
             "view": view_name,
-            "crop_size": f"{crop_width}x{crop_height}",
+            "crop_size": f"{w}x{h}",
             "detections": len(players)
         }
         
@@ -406,6 +530,7 @@ def detect_players(request: dict):
         "similarity": similarity,
         "metadata": {
             "model": "yolov8m",
+            "detection_mode": detection_mode,
             "confidence_threshold": 0.05,
             "preprocessing": "CLAHE + Sharpening",
             "frame_size": f"{width}x{height}",

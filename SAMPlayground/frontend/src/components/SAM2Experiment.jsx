@@ -19,6 +19,7 @@ function SAM2Experiment({ experimentId }) {
     const [fullVideoMessage, setFullVideoMessage] = useState('')
     const [fullVideoProgress, setFullVideoProgress] = useState(null) // {percent, message, status}
     const [fullVideoResult, setFullVideoResult] = useState(null) // Result URL when complete
+    const [error, setError] = useState(null) // Global error state
     const [errorLog, setErrorLog] = useState([]) // Track all errors
     const [draggingBound, setDraggingBound] = useState(null)
     const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
@@ -41,17 +42,22 @@ function SAM2Experiment({ experimentId }) {
 
     // Helper: Determine what UI to show based on timeline
     const shouldShowBoundsAdjustment = () => videoUrl && (frameData || (bounds.top && bounds.top.length > 0))
-    const shouldShowPlayerDetection = () => hasCompletedStep('video_loaded') || hasCompletedStep('bounds_adjusted')
+    const shouldShowPlayerDetection = () => {
+        const vl = hasCompletedStep('video_loaded')
+        const ba = hasCompletedStep('bounds_adjusted')
+        console.log('shouldShowPlayerDetection check:', { vl, ba, timeline: experiment?.timeline })
+        return vl || ba
+    }
     const shouldShowSegmentation = () => hasCompletedStep('players_detected')
 
     // Load experiment data
     useEffect(() => {
         if (experimentId) {
-            loadExperiment()
+            loadExperiment(true) // Restore state on initial load
         }
     }, [experimentId])
 
-    const loadExperiment = async () => {
+    const loadExperiment = async (restoreState = false) => {
         try {
             const response = await fetch(`http://localhost:8000/experiments/${experimentId}`)
             if (!response.ok) throw new Error('Failed to load experiment')
@@ -59,8 +65,9 @@ function SAM2Experiment({ experimentId }) {
             setExperiment(data)
             setExperimentName(data.name)
 
-            // Restore UI state from timeline
-            if (data.timeline && data.timeline.length > 0) {
+            // Restore UI state from timeline ONLY if requested (initial load)
+            // This prevents race conditions where saveTimelineEntry triggers restoration that conflicts with ongoing actions
+            if (restoreState && data.timeline && data.timeline.length > 0) {
                 // Find the latest video_loaded entry
                 const videoEntry = data.timeline.find(entry => entry.step_type === 'video_loaded')
                 if (videoEntry && videoEntry.data) {
@@ -77,7 +84,8 @@ function SAM2Experiment({ experimentId }) {
                             setFrameData(boundsData)
 
                             // Check for bounds_adjusted entry or use detected bounds
-                            const boundsEntry = data.timeline.reverse().find(entry => entry.step_type === 'bounds_adjusted')
+                            // Use slice() to create a copy before reversing to avoid mutating state
+                            const boundsEntry = data.timeline.slice().reverse().find(entry => entry.step_type === 'bounds_adjusted')
                             if (boundsEntry && boundsEntry.data) {
                                 setBounds({
                                     top: boundsEntry.data.top_corners || boundsData.top_corners,
@@ -88,7 +96,7 @@ function SAM2Experiment({ experimentId }) {
                             }
 
                             // Check for player detection
-                            const playersEntry = data.timeline.reverse().find(entry => entry.step_type === 'players_detected')
+                            const playersEntry = data.timeline.slice().reverse().find(entry => entry.step_type === 'players_detected')
                             if (playersEntry && playersEntry.data) {
                                 // Player data available in timeline - UI will show based on timeline
                                 // Note: Full player bbox data is now stored in timeline
@@ -112,7 +120,7 @@ function SAM2Experiment({ experimentId }) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ step_type, data, ...options })
             })
-            loadExperiment() // Reload to get updated timeline
+            await loadExperiment() // Reload to get updated timeline (await to ensure sync)
         } catch (error) {
             console.error('Error saving timeline entry:', error)
         }
@@ -220,21 +228,23 @@ function SAM2Experiment({ experimentId }) {
     const handleVideoLoaded = async (url, videoType = 'uploaded') => {
         console.log('handleVideoLoaded called with url:', url)
         setVideoUrl(url)
+        setError(null)
         const filename = url.split('/').pop()
 
-        // Save video to experiment
-        await fetch(`http://localhost:8000/experiments/${experimentId}/video`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ video_url: url, video_type: videoType })
-        })
-
-        // Save timeline entry
-        await saveTimelineEntry('video_loaded', { video_url: url, video_name: filename, video_type: videoType })
-
-        setIsLoading(true)
-        console.log('Starting detect-field-corners request for:', filename)
         try {
+            // Save video to experiment
+            await fetch(`http://localhost:8000/experiments/${experimentId}/video`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ video_url: url, video_type: videoType })
+            })
+
+            // Save timeline entry
+            await saveTimelineEntry('video_loaded', { video_url: url, video_name: filename, video_type: videoType })
+
+            setIsLoading(true)
+            console.log('Starting detect-field-corners request for:', filename)
+
             const response = await fetch(`http://localhost:8000/detect-field-corners?filename=${filename}`, {
                 method: 'POST'
             })
@@ -245,6 +255,7 @@ function SAM2Experiment({ experimentId }) {
                 const errorText = await response.text()
                 const errorMsg = `Axis Aligned Field Bounds detection failed: ${response.status} - ${errorText}`
                 console.error(errorMsg)
+                setError(errorMsg)
                 await saveTimelineEntry('error', { message: errorMsg, stack: errorText })
                 setIsLoading(false)
                 return
@@ -268,10 +279,12 @@ function SAM2Experiment({ experimentId }) {
         } catch (error) {
             const errorMsg = `Error loading video: ${error.message}`
             console.error(errorMsg, error)
+            setError(errorMsg)
             await saveTimelineEntry('error', { message: errorMsg, stack: error.stack })
+        } finally {
+            setIsLoading(false)
+            console.log('handleVideoLoaded complete, isLoading set to false')
         }
-        setIsLoading(false)
-        console.log('handleVideoLoaded complete, isLoading set to false')
     }
 
     // Draw axis-aligned field bounds on canvas
@@ -512,7 +525,7 @@ function SAM2Experiment({ experimentId }) {
     }
 
     // Step 2: Detect players
-    const handleDetectPlayers = async () => {
+    const handleDetectPlayers = async (mode = 'fop') => {
         const filename = videoUrl.split('/').pop()
 
         setIsLoading(true)
@@ -526,7 +539,9 @@ function SAM2Experiment({ experimentId }) {
                 body: JSON.stringify({
                     filename,
                     top_corners: bounds.top,
-                    bottom_corners: bounds.bottom
+                    bottom_corners: bounds.bottom,
+                    detection_mode: mode,
+                    los_position: losPosition
                 })
             })
 
@@ -534,6 +549,7 @@ function SAM2Experiment({ experimentId }) {
                 const errorText = await response.text()
                 const errorMsg = `Player detection failed: ${response.status} - ${errorText}`
                 console.error(errorMsg)
+                setError(errorMsg)
                 setErrorLog(prev => [...prev, { timestamp: new Date().toLocaleTimeString(), message: errorMsg, stack: errorText }])
                 setLoadingMessage('')
                 setIsLoading(false)
@@ -553,6 +569,13 @@ function SAM2Experiment({ experimentId }) {
                 metadata: data.metadata || {}
             })
 
+            // Map mode to readable label
+            const methodLabels = {
+                'full': 'Full Frame',
+                'fop': 'Within FOP',
+                'los': 'Within LOS'
+            }
+
             // Save timeline entry with full player bbox data AND execution time
             await saveTimelineEntry('players_detected', {
                 top_count: data.top_players?.length || 0,
@@ -561,13 +584,16 @@ function SAM2Experiment({ experimentId }) {
                 top_players: data.top_players || [],
                 bottom_players: data.bottom_players || [],
                 metadata: data.metadata || {},
-                execution_time: executionTime
+                execution_time: executionTime,
+                method: methodLabels[mode] || mode
             })
 
             setLoadingMessage('')
+            // setCurrentStep(3) // Removed unused call
         } catch (error) {
             const errorMsg = `Error detecting players: ${error.message}`
             console.error(errorMsg, error)
+            setError(errorMsg)
             setErrorLog(prev => [...prev, { timestamp: new Date().toLocaleTimeString(), message: errorMsg, stack: error.stack }])
             setLoadingMessage(errorMsg)
             // DON'T reset currentStep - stay on current step and show error
@@ -575,9 +601,6 @@ function SAM2Experiment({ experimentId }) {
             setIsLoading(false)
         }
     }
-
-    // Draw player drawing logic merged into main useEffect at top
-
 
     // Step 3: Segment players
     const handleSegmentPlayers = async () => {
@@ -712,6 +735,8 @@ function SAM2Experiment({ experimentId }) {
         })
     }
 
+    console.log('SAM2Experiment Render:', { videoUrl, isLoading, showDetect: shouldShowPlayerDetection() })
+
     return (
         <div className="sam2-experiment">
             {/* Experiment Header */}
@@ -743,7 +768,129 @@ function SAM2Experiment({ experimentId }) {
                 )}
             </div>
 
+            {error && (
+                <div className="error-banner">
+                    {error}
+                    <button className="close-btn" onClick={() => setError(null)}>×</button>
+                </div>
+            )}
+
             <div className="workspace">
+                {videoUrl && (
+                    <div className="action-panel" style={{ marginBottom: '1rem' }}>
+                        {/* Step 2: Detect Players */}
+                        {shouldShowPlayerDetection() && (
+                            <div className="control-section">
+                                <div className="control-label">
+                                    Detect Players:
+                                    {isLoading && <span className="loading-spinner"></span>}
+                                </div>
+                                <div className="button-group">
+                                    <button
+                                        className="action-btn"
+                                        onClick={() => handleDetectPlayers('full')}
+                                        disabled={isLoading}
+                                    >
+                                        Full Frame
+                                    </button>
+                                    <button
+                                        className="action-btn"
+                                        onClick={() => handleDetectPlayers('fop')}
+                                        disabled={isLoading}
+                                    >
+                                        Within FOP
+                                    </button>
+                                    <button
+                                        className="action-btn"
+                                        onClick={() => handleDetectPlayers('los')}
+                                        disabled={isLoading}
+                                    >
+                                        Within LOS
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {shouldShowSegmentation() && (
+                            <div className="control-section">
+                                <div className="control-label">
+                                    Segmentation:
+                                    {isLoading && <span className="loading-spinner"></span>}
+                                </div>
+                                <div className="button-group">
+                                    <button
+                                        className="action-btn primary"
+                                        onClick={handleSegmentPlayers}
+                                        disabled={isLoading}
+                                    >
+                                        Segment First Frame
+                                    </button>
+                                    <button
+                                        className="action-btn"
+                                        onClick={handleSegmentFullVideo}
+                                        disabled={isLoading}
+                                    >
+                                        Segment Full Video
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {shouldShowBoundsAdjustment() && (
+                            <div className="los-control" style={{ marginTop: '1rem', padding: '0.5rem', background: '#333', borderRadius: '4px' }}>
+                                {/* View Mode Toggles */}
+                                {players.top.length > 0 && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+                                        <span style={{ color: '#ccc', fontSize: '0.9rem', minWidth: '50px' }}>Players:</span>
+                                        <button
+                                            onClick={() => setPlayerViewMode('bounds')}
+                                            style={{
+                                                flex: 1,
+                                                padding: '4px',
+                                                backgroundColor: playerViewMode === 'bounds' ? '#646cff' : '#444',
+                                                border: 'none',
+                                                borderRadius: '4px',
+                                                color: 'white',
+                                                cursor: 'pointer'
+                                            }}
+                                        >
+                                            Bounds
+                                        </button>
+                                        <button
+                                            onClick={() => setPlayerViewMode('occlude')}
+                                            style={{
+                                                flex: 1,
+                                                padding: '4px',
+                                                backgroundColor: playerViewMode === 'occlude' ? '#646cff' : '#444',
+                                                border: 'none',
+                                                borderRadius: '4px',
+                                                color: 'white',
+                                                cursor: 'pointer'
+                                            }}
+                                        >
+                                            Occlude
+                                        </button>
+                                        <button
+                                            onClick={() => setPlayerViewMode('hide')}
+                                            style={{
+                                                flex: 1,
+                                                padding: '4px',
+                                                backgroundColor: playerViewMode === 'hide' ? '#646cff' : '#444',
+                                                border: 'none',
+                                                borderRadius: '4px',
+                                                color: 'white',
+                                                cursor: 'pointer'
+                                            }}
+                                        >
+                                            Hide
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 {!videoUrl && (
                     <div className="upload-section">
                         <h3>Load a Video</h3>
@@ -807,181 +954,87 @@ function SAM2Experiment({ experimentId }) {
                             </div>
                         )}
 
-
-
-
-                        {/* Action Buttons Panel - shows NEXT available action */}
-                        {videoUrl && (
-                            <div className="action-panel">
-                                {shouldShowBoundsAdjustment() && !players.top.length && (
-                                    <button
-                                        className="primary-button"
-                                        onClick={handleDetectPlayers}
-                                        disabled={isLoading}
-                                    >
-                                        {isLoading ? 'Detecting Players...' : 'Detect Players →'}
-                                    </button>
-                                )}
-
-                                {shouldShowBoundsAdjustment() && (
-                                    <div className="los-control" style={{ marginTop: '1rem', padding: '0.5rem', background: '#333', borderRadius: '4px' }}>
-                                        {/* View Mode Toggles */}
-                                        {players.top.length > 0 && (
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
-                                                <span style={{ color: '#ccc', fontSize: '0.9rem', minWidth: '50px' }}>Players:</span>
-                                                <button
-                                                    onClick={() => setPlayerViewMode('bounds')}
-                                                    style={{
-                                                        flex: 1,
-                                                        padding: '4px',
-                                                        backgroundColor: playerViewMode === 'bounds' ? '#646cff' : '#444',
-                                                        border: 'none',
-                                                        borderRadius: '4px',
-                                                        color: 'white',
-                                                        cursor: 'pointer'
-                                                    }}
-                                                >
-                                                    Bounds
-                                                </button>
-                                                <button
-                                                    onClick={() => setPlayerViewMode('occlude')}
-                                                    style={{
-                                                        flex: 1,
-                                                        padding: '4px',
-                                                        backgroundColor: playerViewMode === 'occlude' ? '#646cff' : '#444',
-                                                        border: 'none',
-                                                        borderRadius: '4px',
-                                                        color: 'white',
-                                                        cursor: 'pointer'
-                                                    }}
-                                                >
-                                                    Occlude
-                                                </button>
-                                                <button
-                                                    onClick={() => setPlayerViewMode('hide')}
-                                                    style={{
-                                                        flex: 1,
-                                                        padding: '4px',
-                                                        backgroundColor: playerViewMode === 'hide' ? '#646cff' : '#444',
-                                                        border: 'none',
-                                                        borderRadius: '4px',
-                                                        color: 'white',
-                                                        cursor: 'pointer'
-                                                    }}
-                                                >
-                                                    Hide
-                                                </button>
-                                            </div>
-                                        )}
-
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                                            <span style={{ color: '#ccc' }}>Line of Scrimmage: {(losPosition * 100).toFixed(1)}%</span>
-                                            {bounds.top.length === 4 && bounds.bottom.length === 4 && (
-                                                <span style={{ color: '#666', fontSize: '0.8rem' }}>
-                                                    {(() => {
-                                                        const topLOS = calculateLOSPolygon(bounds.top[0], bounds.top[1], bounds.top[2], bounds.top[3], losPosition)
-                                                        const bottomLOS = calculateLOSPolygon(bounds.bottom[0], bounds.bottom[1], bounds.bottom[2], bounds.bottom[3], losPosition)
-                                                        const topBox = getAABB(topLOS)
-                                                        const bottomBox = getAABB(bottomLOS)
-
-                                                        const fmt = (b) => `[${Math.round(b.minX)},${Math.round(b.minY)} - ${Math.round(b.maxX)},${Math.round(b.maxY)}]`
-                                                        return `L-LOS: ${fmt(topBox)}  R-LOS: ${fmt(bottomBox)}`
-                                                    })()}
-                                                </span>
-                                            )}
-                                        </div>
-                                        <input
-                                            id="los-slider"
-                                            type="range"
-                                            min="0"
-                                            max="1"
-                                            step="0.001"
-                                            value={losPosition}
-                                            onChange={(e) => setLosPosition(parseFloat(e.target.value))}
-                                            style={{ width: '100%' }}
-                                        />
-                                    </div>
-                                )}
-
-                                {players.top.length > 0 && !segmentResult && (
-                                    <button
-                                        className="primary-button"
-                                        onClick={handleSegmentPlayers}
-                                        disabled={isLoading}
-                                    >
-                                        {isLoading ? 'Segmenting...' : 'Segment First Frame →'}
-                                    </button>
-                                )}
-
-                                {segmentResult && !fullVideoResult && (
-                                    <button
-                                        className="primary-button"
-                                        onClick={handleSegmentFullVideo}
-                                        disabled={fullVideoProgress?.status === 'processing'}
-                                    >
-                                        {fullVideoProgress?.status === 'processing' ? 'Processing...' : 'Segment Full Video →'}
-                                    </button>
-                                )}
-
-                                {/* Full Video Progress */}
-                                {fullVideoProgress && (
-                                    <div className="progress-display">
-                                        <div className="progress-bar">
-                                            <div
-                                                className="progress-fill"
-                                                style={{ width: `${fullVideoProgress.percent}%` }}
-                                            />
-                                        </div>
-                                        <div className="progress-text">
-                                            {fullVideoProgress.message} - {fullVideoProgress.percent}%
-                                        </div>
-                                        {fullVideoProgress.current_frame && (
-                                            <div className="progress-detail">
-                                                Frame {fullVideoProgress.current_frame} / {fullVideoProgress.total_frames}
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-
-                                {/* Full Video Result */}
-                                {fullVideoResult && (
-                                    <div className="video-result">
-                                        <h4>✅ Full Video Segmentation Complete</h4>
-                                        <video src={fullVideoResult} controls style={{ maxWidth: '100%', borderRadius: '8px' }} />
-                                        <a href={fullVideoResult} download className="secondary-button">
-                                            Download Segmented Video
-                                        </a>
+                        {/* Full Video Progress */}
+                        {fullVideoProgress && (
+                            <div className="progress-display">
+                                <div className="progress-bar">
+                                    <div
+                                        className="progress-fill"
+                                        style={{ width: `${fullVideoProgress.percent}%` }}
+                                    />
+                                </div>
+                                <div className="progress-text">
+                                    {fullVideoProgress.message} - {fullVideoProgress.percent}%
+                                </div>
+                                {fullVideoProgress.current_frame && (
+                                    <div className="progress-detail">
+                                        Frame {fullVideoProgress.current_frame} / {fullVideoProgress.total_frames}
                                     </div>
                                 )}
                             </div>
                         )}
 
+                        {/* Full Video Result */}
+                        {fullVideoResult && (
+                            <div className="video-result">
+                                <h4>✅ Full Video Segmentation Complete</h4>
+                                <video src={fullVideoResult} controls style={{ maxWidth: '100%', borderRadius: '8px' }} />
+                                <a href={fullVideoResult} download className="secondary-button">
+                                    Download Segmented Video
+                                </a>
+                            </div>
+                        )}
 
+                        {/* LOS Slider */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', marginTop: '1rem' }}>
+                            <span style={{ color: '#ccc' }}>Line of Scrimmage: {(losPosition * 100).toFixed(1)}%</span>
+                            {bounds.top.length === 4 && bounds.bottom.length === 4 && (
+                                <span style={{ color: '#666', fontSize: '0.8rem' }}>
+                                    {(() => {
+                                        const topLOS = calculateLOSPolygon(bounds.top[0], bounds.top[1], bounds.top[2], bounds.top[3], losPosition)
+                                        const bottomLOS = calculateLOSPolygon(bounds.bottom[0], bounds.bottom[1], bounds.bottom[2], bounds.bottom[3], losPosition)
+                                        const topBox = getAABB(topLOS)
+                                        const bottomBox = getAABB(bottomLOS)
 
-                        {
-                            errorLog.length > 0 && (
-                                <div className="error-log">
-                                    <h3>Error Log</h3>
-                                    <button className="secondary-button" onClick={() => setErrorLog([])} style={{ marginBottom: '1rem' }}>Clear Errors</button>
-                                    {errorLog.map((error, idx) => (
-                                        <div key={idx} className="error-item">
-                                            <div className="error-header">
-                                                <span className="error-time">{error.timestamp}</span>
-                                                <span className="error-message">{error.message}</span>
-                                            </div>
-                                            {error.stack && (
-                                                <pre className="error-stack">{error.stack}</pre>
-                                            )}
-                                        </div>
-                                    ))}
+                                        const fmt = (b) => `[${Math.round(b.minX)},${Math.round(b.minY)} - ${Math.round(b.maxX)},${Math.round(b.maxY)}]`
+                                        return `L-LOS: ${fmt(topBox)}  R-LOS: ${fmt(bottomBox)}`
+                                    })()}
+                                </span>
+                            )}
+                        </div>
+                        <input
+                            id="los-slider"
+                            type="range"
+                            min="0"
+                            max="1"
+                            step="0.001"
+                            value={losPosition}
+                            onChange={(e) => setLosPosition(parseFloat(e.target.value))}
+                            style={{ width: '100%' }}
+                        />
+                    </div>
+                )}
+
+                {/* Error Log */}
+                {errorLog.length > 0 && (
+                    <div className="error-log">
+                        <h3>Error Log</h3>
+                        <button className="secondary-button" onClick={() => setErrorLog([])} style={{ marginBottom: '1rem' }}>Clear Errors</button>
+                        {errorLog.map((error, idx) => (
+                            <div key={idx} className="error-item">
+                                <div className="error-header">
+                                    <span className="error-time">{error.timestamp}</span>
+                                    <span className="error-message">{error.message}</span>
                                 </div>
-                            )
-                        }
-                    </div >
-                )
-                }
-            </div >
-        </div >
+                                {error.stack && (
+                                    <pre className="error-stack">{error.stack}</pre>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </div>
     )
 }
 

@@ -17,6 +17,9 @@ function SequentialResults({ experiment, bounds, players, segmentResult }) {
     const renderEntry = (entry, index, timeline) => {
         const duration = index < timeline.length - 1 ? formatDuration(entry.timestamp, timeline[index + 1].timestamp) : null
 
+        // Defensive check for data
+        if (!entry.data) return null
+
         switch (entry.step_type) {
             case 'video_loaded':
                 return (
@@ -27,7 +30,7 @@ function SequentialResults({ experiment, bounds, players, segmentResult }) {
                             {duration && <span className="entry-duration">{duration}</span>}
                         </div>
                         <div className="entry-content">
-                            <p className="video-name">{entry.data.video_name}</p>
+                            <p className="video-name">{entry.data.video_name || 'Unknown Video'}</p>
                             {entry.data.video_type === 'test' && <span className="badge">Test Clip</span>}
                         </div>
                     </div>
@@ -111,6 +114,11 @@ function SequentialResults({ experiment, bounds, players, segmentResult }) {
                         <div className="entry-header">
                             <span className="entry-icon">👥</span>
                             <span className="entry-title">Players Detected</span>
+                            {entry.data.method && (
+                                <span style={{ marginLeft: '1rem', fontSize: '0.8rem', color: '#aaa' }}>
+                                    Method: {entry.data.method}
+                                </span>
+                            )}
                             {entry.data.execution_time !== undefined ? (
                                 <span className="entry-duration" title="Execution time">
                                     ⏱️ {entry.data.execution_time.toFixed(2)}s
