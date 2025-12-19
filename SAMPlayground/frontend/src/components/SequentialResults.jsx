@@ -109,43 +109,64 @@ function SequentialResults({ experiment, bounds, players, segmentResult }) {
                 )
 
             case 'players_detected':
+                const boundsEntry = timeline.slice(0, index).reverse().find(e => e.step_type === 'bounds_adjusted')
+                const method = entry.data.method || 'Unknown'
+                const isFOP = method.toLowerCase().includes('fop')
+                const isFull = method.toLowerCase().includes('full')
+
+                const getBoundsText = (aabb) => {
+                    if (!aabb) return 'N/A'
+                    return `[${Math.round(aabb.minX)}, ${Math.round(aabb.minY)} - ${Math.round(aabb.maxX)}, ${Math.round(aabb.maxY)}]`
+                }
+
                 return (
                     <div key={entry.id || index} className="result-entry players-entry">
-                        <div className="entry-header">
-                            <span className="entry-icon">👥</span>
-                            <span className="entry-title">Players Detected</span>
-                            {entry.data.method && (
-                                <span style={{ marginLeft: '1rem', fontSize: '0.8rem', color: '#aaa' }}>
-                                    Method: {entry.data.method}
+                        <div className="entry-header" style={{ flexDirection: 'column', alignItems: 'center', gap: '0.25rem', padding: '0.5rem' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
+                                <span className="entry-icon">👥</span>
+                                <span className="entry-title" style={{ flex: 'none' }}>Players Detected</span>
+                                <span className="detection-method-badge" style={{
+                                    marginLeft: '0.5rem',
+                                    padding: '2px 8px',
+                                    borderRadius: '12px',
+                                    background: '#333',
+                                    color: '#fff',
+                                    fontSize: '0.8rem',
+                                    border: '1px solid #555',
+                                    alignSelf: 'center'
+                                }}>
+                                    {method} Mode
                                 </span>
-                            )}
-                            {entry.data.execution_time !== undefined ? (
-                                <span className="entry-duration" title="Execution time">
-                                    ⏱️ {entry.data.execution_time.toFixed(2)}s
-                                </span>
-                            ) : (
-                                duration && <span className="entry-duration">{duration}</span>
-                            )}
+                                {entry.data.execution_time !== undefined ? (
+                                    <span className="entry-duration" style={{ marginLeft: '0.5rem' }} title="Execution time">
+                                        ⏱️ {entry.data.execution_time.toFixed(2)}s
+                                    </span>
+                                ) : (
+                                    duration && <span className="entry-duration" style={{ marginLeft: '0.5rem' }}>{duration}</span>
+                                )}
+                            </div>
+                            <div className="similarity" style={{ fontSize: '0.9rem', color: '#aaa' }}>
+                                Stereo Similarity: {((entry.data.similarity || 0) * 100).toFixed(0)}%
+                            </div>
                         </div>
                         <div className="entry-content">
-                            <div className="player-counts">
-                                <div className="count-badge">
-                                    <span className="label">Left</span>
-                                    <span className="count">{entry.data.top_count || 0}</span>
-                                </div>
-                                <div className="count-badge">
-                                    <span className="label">Right</span>
-                                    <span className="count">{entry.data.bottom_count || 0}</span>
-                                </div>
-                                <div className="similarity">
-                                    Similarity: {((entry.data.similarity || 0) * 100).toFixed(0)}%
-                                </div>
-                            </div>
+                            {/* Detailed Player Lists with Counts merged in */}
+                            <div className="player-lists-detail" style={{ marginTop: '0', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
 
-                            {/* Detailed Player Lists */}
-                            <div className="player-lists-detail" style={{ marginTop: '1rem', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                                {/* Left View Column */}
                                 <div className="player-list-group">
-                                    <h5 style={{ margin: '0 0 0.5rem 0', color: '#888' }}>Left View Details</h5>
+                                    <div className="column-header" style={{ marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid #444' }}>
+                                        <h5 style={{ margin: 0, color: '#fff', fontSize: '1rem' }}>
+                                            Left (Top View) <span style={{ background: '#333', padding: '2px 6px', borderRadius: '4px', marginLeft: '0.5rem' }}>{entry.data.top_count || 0}</span>
+                                        </h5>
+                                        {!isFull && boundsEntry?.data?.top_aabb && (
+                                            <div className="badge-text" style={{ fontSize: '0.75rem', marginTop: '0.25rem', color: '#888' }}>
+                                                Bounds: {getBoundsText(boundsEntry.data.top_aabb)}
+                                            </div>
+                                        )}
+                                        {isFull && <div className="badge-text" style={{ fontSize: '0.75rem', marginTop: '0.25rem', color: '#888' }}>Full Frame</div>}
+                                    </div>
+
                                     <div className="player-items-scroll" style={{ maxHeight: '200px', overflowY: 'auto', background: '#222', padding: '0.5rem', borderRadius: '4px' }}>
                                         {(entry.data.top_players || []).map((p, i) => (
                                             <div key={i} style={{ fontSize: '0.8rem', color: '#aaa', marginBottom: '0.25rem' }}>
@@ -155,8 +176,21 @@ function SequentialResults({ experiment, bounds, players, segmentResult }) {
                                         {(!entry.data.top_players || entry.data.top_players.length === 0) && <div style={{ fontSize: '0.8rem', color: '#666' }}>No players</div>}
                                     </div>
                                 </div>
+
+                                {/* Right View Column */}
                                 <div className="player-list-group">
-                                    <h5 style={{ margin: '0 0 0.5rem 0', color: '#888' }}>Right View Details</h5>
+                                    <div className="column-header" style={{ marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid #444' }}>
+                                        <h5 style={{ margin: 0, color: '#fff', fontSize: '1rem' }}>
+                                            Right (Bottom View) <span style={{ background: '#333', padding: '2px 6px', borderRadius: '4px', marginLeft: '0.5rem' }}>{entry.data.bottom_count || 0}</span>
+                                        </h5>
+                                        {!isFull && boundsEntry?.data?.bottom_aabb && (
+                                            <div className="badge-text" style={{ fontSize: '0.75rem', marginTop: '0.25rem', color: '#888' }}>
+                                                Bounds: {getBoundsText(boundsEntry.data.bottom_aabb)}
+                                            </div>
+                                        )}
+                                        {isFull && <div className="badge-text" style={{ fontSize: '0.75rem', marginTop: '0.25rem', color: '#888' }}>Full Frame</div>}
+                                    </div>
+
                                     <div className="player-items-scroll" style={{ maxHeight: '200px', overflowY: 'auto', background: '#222', padding: '0.5rem', borderRadius: '4px' }}>
                                         {(entry.data.bottom_players || []).map((p, i) => (
                                             <div key={i} style={{ fontSize: '0.8rem', color: '#aaa', marginBottom: '0.25rem' }}>

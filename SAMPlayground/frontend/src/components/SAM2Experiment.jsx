@@ -24,7 +24,8 @@ function SAM2Experiment({ experimentId }) {
     const [draggingBound, setDraggingBound] = useState(null)
     const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
     const [hoveredBound, setHoveredBound] = useState(null)
-    const [losPosition, setLosPosition] = useState(0.33) // 0 to 1, default 1/3 way down field
+    const [losPosition, setLosPosition] = useState(0.281) // 0 to 1, default 28.1% way down field
+    const [activeDetectionMethod, setActiveDetectionMethod] = useState(null) // Track active detection method locally
     const [playerViewMode, setPlayerViewMode] = useState('bounds') // 'bounds' or 'occlude'
     const canvasRef = useRef(null)
     const videoRef = useRef(null)
@@ -98,6 +99,18 @@ function SAM2Experiment({ experimentId }) {
                             // Check for player detection
                             const playersEntry = data.timeline.slice().reverse().find(entry => entry.step_type === 'players_detected')
                             if (playersEntry && playersEntry.data) {
+                                // Set active method from timeline
+                                const method = playersEntry.data.method // 'Full Frame', 'Within FOP', or 'Within LOS' (mapped values)
+                                // We need to map back to ID or just store the label. 
+                                // The state uses ID ('full', 'fop', 'los') for logic but our timeline stores mapped labels.
+                                // Let's try to normalize.
+                                let methodId = null
+                                if (method === 'Full Frame' || method === 'Full') methodId = 'full'
+                                else if (method === 'Within FOP' || method === 'FOP') methodId = 'fop'
+                                else if (method === 'Within LOS' || method === 'LOS') methodId = 'los'
+
+                                setActiveDetectionMethod(methodId)
+
                                 // Player data available in timeline - UI will show based on timeline
                                 // Note: Full player bbox data is now stored in timeline
                             }
@@ -526,6 +539,9 @@ function SAM2Experiment({ experimentId }) {
 
     // Step 2: Detect players
     const handleDetectPlayers = async (mode = 'fop') => {
+        // Immediate UI feedback
+        setActiveDetectionMethod(mode)
+
         const filename = videoUrl.split('/').pop()
 
         setIsLoading(true)
@@ -778,38 +794,7 @@ function SAM2Experiment({ experimentId }) {
             <div className="workspace">
                 {videoUrl && (
                     <div className="action-panel" style={{ marginBottom: '1rem' }}>
-                        {/* Step 2: Detect Players */}
-                        {shouldShowPlayerDetection() && (
-                            <div className="control-section">
-                                <div className="control-label">
-                                    Detect Players:
-                                    {isLoading && <span className="loading-spinner"></span>}
-                                </div>
-                                <div className="button-group">
-                                    <button
-                                        className="action-btn"
-                                        onClick={() => handleDetectPlayers('full')}
-                                        disabled={isLoading}
-                                    >
-                                        Full Frame
-                                    </button>
-                                    <button
-                                        className="action-btn"
-                                        onClick={() => handleDetectPlayers('fop')}
-                                        disabled={isLoading}
-                                    >
-                                        Within FOP
-                                    </button>
-                                    <button
-                                        className="action-btn"
-                                        onClick={() => handleDetectPlayers('los')}
-                                        disabled={isLoading}
-                                    >
-                                        Within LOS
-                                    </button>
-                                </div>
-                            </div>
-                        )}
+
 
                         {shouldShowSegmentation() && (
                             <div className="control-section">
@@ -839,53 +824,7 @@ function SAM2Experiment({ experimentId }) {
                         {shouldShowBoundsAdjustment() && (
                             <div className="los-control" style={{ marginTop: '1rem', padding: '0.5rem', background: '#333', borderRadius: '4px' }}>
                                 {/* View Mode Toggles */}
-                                {players.top.length > 0 && (
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
-                                        <span style={{ color: '#ccc', fontSize: '0.9rem', minWidth: '50px' }}>Players:</span>
-                                        <button
-                                            onClick={() => setPlayerViewMode('bounds')}
-                                            style={{
-                                                flex: 1,
-                                                padding: '4px',
-                                                backgroundColor: playerViewMode === 'bounds' ? '#646cff' : '#444',
-                                                border: 'none',
-                                                borderRadius: '4px',
-                                                color: 'white',
-                                                cursor: 'pointer'
-                                            }}
-                                        >
-                                            Bounds
-                                        </button>
-                                        <button
-                                            onClick={() => setPlayerViewMode('occlude')}
-                                            style={{
-                                                flex: 1,
-                                                padding: '4px',
-                                                backgroundColor: playerViewMode === 'occlude' ? '#646cff' : '#444',
-                                                border: 'none',
-                                                borderRadius: '4px',
-                                                color: 'white',
-                                                cursor: 'pointer'
-                                            }}
-                                        >
-                                            Occlude
-                                        </button>
-                                        <button
-                                            onClick={() => setPlayerViewMode('hide')}
-                                            style={{
-                                                flex: 1,
-                                                padding: '4px',
-                                                backgroundColor: playerViewMode === 'hide' ? '#646cff' : '#444',
-                                                border: 'none',
-                                                borderRadius: '4px',
-                                                color: 'white',
-                                                cursor: 'pointer'
-                                            }}
-                                        >
-                                            Hide
-                                        </button>
-                                    </div>
-                                )}
+
                             </div>
                         )}
                     </div>
@@ -985,11 +924,128 @@ function SAM2Experiment({ experimentId }) {
                             </div>
                         )}
 
+                        {/* View Mode Toggles - Moved here */}
+                        {/* Detection Buttons - Moved here just above Players UI */}
+                        {shouldShowPlayerDetection() && (
+                            <div className="control-section" style={{ marginTop: '1rem', borderTop: '1px solid #333', paddingTop: '1rem' }}>
+                                <div className="button-group" style={{ display: 'flex', gap: '10px' }}>
+                                    <span style={{ color: '#ccc', fontSize: '0.9rem', minWidth: '100px', alignSelf: 'center' }}>Detect Players:</span>
+                                    <div style={{ display: 'flex', flex: 1 }}>
+                                        {['Full', 'FOP', 'LOS'].map((mode, idx) => {
+                                            const modeId = mode.toLowerCase()
+                                            const label = mode === 'Full' ? 'Full Frame' : `Within ${mode}`
+
+                                            // Find latest result for this specific mode
+                                            const lastRun = experiment?.timeline?.slice().reverse().find(e =>
+                                                e.step_type === 'players_detected' &&
+                                                (e.data?.method === label || e.data?.method === mode)
+                                            )
+
+                                            const isActive = activeDetectionMethod === modeId
+
+                                            return (
+                                                <button
+                                                    key={mode}
+                                                    onClick={() => handleDetectPlayers(modeId)}
+                                                    disabled={isLoading}
+                                                    style={{
+                                                        flex: 1,
+                                                        display: 'flex',
+                                                        flexDirection: 'column',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                        padding: '10px 12px',
+                                                        backgroundColor: isActive ? '#646cff' : '#444',
+                                                        border: '1px solid #555',
+                                                        borderRight: idx < 2 ? 'none' : '1px solid #555',
+                                                        borderLeft: idx > 0 ? 'none' : '1px solid #555',
+                                                        borderRadius: idx === 0 ? '4px 0 0 4px' : idx === 2 ? '0 4px 4px 0' : '0',
+                                                        color: 'white',
+                                                        cursor: 'pointer',
+                                                        minHeight: '60px',
+                                                        transition: 'background-color 0.2s'
+                                                    }}
+                                                >
+                                                    <span style={{ fontWeight: 500, fontSize: '0.95rem' }}>{label}</span>
+                                                    {lastRun ? (
+                                                        <span style={{
+                                                            fontSize: '0.75rem',
+                                                            opacity: 0.9,
+                                                            marginTop: '6px',
+                                                            padding: '2px 6px',
+                                                            background: 'rgba(0,0,0,0.2)',
+                                                            borderRadius: '3px',
+                                                            whiteSpace: 'nowrap'
+                                                        }}>
+                                                            {lastRun.data.execution_time?.toFixed(1)}s | L:{lastRun.data.top_count} R:{lastRun.data.bottom_count}
+                                                        </span>
+                                                    ) : (
+                                                        <span style={{ fontSize: '0.7rem', opacity: 0.4, marginTop: '6px' }}>
+                                                            Not run
+                                                        </span>
+                                                    )}
+                                                </button>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                        {players.top.length > 0 && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px', marginTop: '1rem' }}>
+                                <span style={{ color: '#ccc', fontSize: '0.9rem', minWidth: '50px' }}>Players:</span>
+                                <button
+                                    onClick={() => setPlayerViewMode('bounds')}
+                                    style={{
+                                        flex: 1,
+                                        padding: '4px',
+                                        backgroundColor: playerViewMode === 'bounds' ? '#646cff' : '#444',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        color: 'white',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    Bounds
+                                </button>
+                                <button
+                                    onClick={() => setPlayerViewMode('occlude')}
+                                    style={{
+                                        flex: 1,
+                                        padding: '4px',
+                                        backgroundColor: playerViewMode === 'occlude' ? '#646cff' : '#444',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        color: 'white',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    Occlude
+                                </button>
+                                <button
+                                    onClick={() => setPlayerViewMode('hide')}
+                                    style={{
+                                        flex: 1,
+                                        padding: '4px',
+                                        backgroundColor: playerViewMode === 'hide' ? '#646cff' : '#444',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        color: 'white',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    Hide
+                                </button>
+                            </div>
+                        )}
+
                         {/* LOS Slider */}
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', marginTop: '1rem' }}>
-                            <span style={{ color: '#ccc' }}>Line of Scrimmage: {(losPosition * 100).toFixed(1)}%</span>
+                            <span style={{ color: '#ccc' }}>
+                                Line of Scrimmage: {(losPosition * 100).toFixed(1)} yards
+                            </span>
                             {bounds.top.length === 4 && bounds.bottom.length === 4 && (
-                                <span style={{ color: '#666', fontSize: '0.8rem' }}>
+                                <div style={{ color: '#666', fontSize: '0.75rem', display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
                                     {(() => {
                                         const topLOS = calculateLOSPolygon(bounds.top[0], bounds.top[1], bounds.top[2], bounds.top[3], losPosition)
                                         const bottomLOS = calculateLOSPolygon(bounds.bottom[0], bounds.bottom[1], bounds.bottom[2], bounds.bottom[3], losPosition)
@@ -997,9 +1053,14 @@ function SAM2Experiment({ experimentId }) {
                                         const bottomBox = getAABB(bottomLOS)
 
                                         const fmt = (b) => `[${Math.round(b.minX)},${Math.round(b.minY)} - ${Math.round(b.maxX)},${Math.round(b.maxY)}]`
-                                        return `L-LOS: ${fmt(topBox)}  R-LOS: ${fmt(bottomBox)}`
+                                        return (
+                                            <>
+                                                <span>L-LOS: {fmt(topBox)}</span>
+                                                <span>R-LOS: {fmt(bottomBox)}</span>
+                                            </>
+                                        )
                                     })()}
-                                </span>
+                                </div>
                             )}
                         </div>
                         <input

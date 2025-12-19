@@ -400,7 +400,8 @@ async def detect_players(request: dict):
         
         if detection_mode == 'full':
             h, w = img.shape[:2]
-            # Use full image bounds
+            # Use full image bounds - these are already local to the img (which is a split frame)
+            # So no y_offset adjustment needed for these generated local corners
             region_corners = [
                 {'x': 0, 'y': 0},
                 {'x': w, 'y': 0},
@@ -414,12 +415,14 @@ async def detect_players(request: dict):
                  aabb = calculate_los_aabb(p1, p2, p3, p4, los_position)
                  
                  if aabb:
-                     # Clamp to image bounds
                      h, w = img.shape[:2]
+                     # aabb is in GLOBAL coordinates (e.g. y=3000 for bottom view)
+                     # We must convert to local coordinates relative to the split image
+                     
                      x1 = max(0, int(aabb['x1']))
-                     y1 = max(0, int(aabb['y1']))
+                     y1 = max(0, int(aabb['y1'] - y_offset))
                      x2 = min(w, int(aabb['x2']))
-                     y2 = min(h, int(aabb['y2']))
+                     y2 = min(h, int(aabb['y2'] - y_offset))
                      
                      region_corners = [
                          {'x': x1, 'y': y1},
@@ -427,12 +430,23 @@ async def detect_players(request: dict):
                          {'x': x2, 'y': y2},
                          {'x': x1, 'y': y2}
                      ]
+        
+        # If using 'fop' (default), region_corners are global corners passed in.
+        # We need to adjust them to local frame coords if they haven't been processed above
+        if detection_mode == 'fop':
+             local_corners = []
+             for c in region_corners:
+                 local_corners.append({
+                     'x': c['x'],
+                     'y': c['y'] - y_offset
+                 })
+             region_corners = local_corners
 
         # Convert simple list to numpy for boundingRect
         points = np.array([[c["x"], c["y"]] for c in region_corners], dtype=np.int32)
         x, y, w, h = cv2.boundingRect(points)
         
-        # Ensure valid crop
+        # Ensure valid crop within the image
         x = max(0, x)
         y = max(0, y)
         w = min(w, img.shape[1] - x)
