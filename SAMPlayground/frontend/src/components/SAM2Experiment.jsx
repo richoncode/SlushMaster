@@ -601,7 +601,9 @@ function SAM2Experiment({ experimentId }) {
                 bottom_players: data.bottom_players || [],
                 metadata: data.metadata || {},
                 execution_time: executionTime,
-                method: methodLabels[mode] || mode
+                method: methodLabels[mode] || mode,
+                frame_number: data.metadata?.frame_number ?? 0,
+                video_timestamp: data.metadata?.video_timestamp ?? 0.0
             })
 
             setLoadingMessage('')

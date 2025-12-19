@@ -14,6 +14,37 @@ function SequentialResults({ experiment, bounds, players, segmentResult }) {
         return diff < 60 ? `${diff.toFixed(1)}s` : `${(diff / 60).toFixed(1)}m`
     }
 
+    const handleDownloadJSON = (entry) => {
+        const transformPlayer = (p) => ({
+            centerX: parseFloat(((p.x1 + p.x2) / 2).toFixed(2)),
+            centerY: parseFloat(((p.y1 + p.y2) / 2).toFixed(2)),
+            radiusX: parseFloat(((p.x2 - p.x1) / 2).toFixed(2)),
+            radiusY: parseFloat(((p.y2 - p.y1) / 2).toFixed(2)),
+            confidence: parseFloat((p.confidence || 0).toFixed(4))
+        })
+
+        const data = {
+            timestamp: entry.timestamp,
+            method: entry.data.method,
+            frame: {
+                videoTimestamp: entry.data.video_timestamp ?? 0.0,
+                frameNumber: entry.data.frame_number ?? 0,
+                left_view: (entry.data.top_players || []).map(transformPlayer),
+                right_view: (entry.data.bottom_players || []).map(transformPlayer)
+            }
+        }
+
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `detection_${new Date(entry.timestamp).getTime()}.json`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+    }
+
     const renderEntry = (entry, index, timeline) => {
         const duration = index < timeline.length - 1 ? formatDuration(entry.timestamp, timeline[index + 1].timestamp) : null
 
@@ -144,6 +175,26 @@ function SequentialResults({ experiment, bounds, players, segmentResult }) {
                                 ) : (
                                     duration && <span className="entry-duration" style={{ marginLeft: '0.5rem' }}>{duration}</span>
                                 )}
+                                <button
+                                    className="download-json-btn"
+                                    onClick={() => handleDownloadJSON(entry)}
+                                    title="Download detection data as JSON"
+                                    style={{
+                                        marginLeft: 'auto',
+                                        background: '#444',
+                                        border: '1px solid #555',
+                                        borderRadius: '4px',
+                                        color: '#fff',
+                                        padding: '4px 8px',
+                                        fontSize: '0.75rem',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '4px'
+                                    }}
+                                >
+                                    📥 JSON
+                                </button>
                             </div>
                             <div className="similarity" style={{ fontSize: '0.9rem', color: '#aaa' }}>
                                 Stereo Similarity: {((entry.data.similarity || 0) * 100).toFixed(0)}%

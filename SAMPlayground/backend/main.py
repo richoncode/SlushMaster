@@ -550,7 +550,9 @@ async def detect_players(request: dict):
             "frame_size": f"{width}x{height}",
             "top_view": top_metadata,
             "bottom_view": bottom_metadata,
-            "detected_separately": True
+            "detected_separately": True,
+            "frame_number": 0,
+            "video_timestamp": 0.0
         }
     }
 
