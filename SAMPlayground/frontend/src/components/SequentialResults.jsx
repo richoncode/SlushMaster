@@ -16,16 +16,27 @@ function SequentialResults({ experiment, bounds, players, segmentResult }) {
 
     const handleDownloadJSON = (entry) => {
         const transformPlayer = (p) => ({
-            centerX: parseFloat(((p.x1 + p.x2) / 2).toFixed(2)),
-            centerY: parseFloat(((p.y1 + p.y2) / 2).toFixed(2)),
-            radiusX: parseFloat(((p.x2 - p.x1) / 2).toFixed(2)),
-            radiusY: parseFloat(((p.y2 - p.y1) / 2).toFixed(2)),
+            centerX: Math.round((p.x1 + p.x2) / 2),
+            centerY: Math.round((p.y1 + p.y2) / 2),
+            radiusX: Math.round((p.x2 - p.x1) / 2),
+            radiusY: Math.round((p.y2 - p.y1) / 2),
             confidence: parseFloat((p.confidence || 0).toFixed(4))
         })
+
+        // Find the most recent bounds entry before or at this detection
+        const entryIndex = experiment.timeline.indexOf(entry)
+        const boundsEntry = experiment.timeline
+            .slice(0, entryIndex + 1)
+            .reverse()
+            .find(e => e.step_type === 'bounds_adjusted')
 
         const data = {
             timestamp: entry.timestamp,
             method: entry.data.method,
+            fop_corners: {
+                left: boundsEntry?.data?.top_corners || [],
+                right: boundsEntry?.data?.bottom_corners || []
+            },
             frame: {
                 videoTimestamp: entry.data.video_timestamp ?? 0.0,
                 frameNumber: entry.data.frame_number ?? 0,
