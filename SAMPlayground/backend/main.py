@@ -115,6 +115,7 @@ async def get_video(filename: str):
         file_path = PROCESSED_DIR / filename
         if not file_path.exists():
             raise HTTPException(status_code=404, detail="Video not found")
+    
     return FileResponse(file_path)
 
 def process_video_task(filename: str):

@@ -9,6 +9,7 @@ function SAM2Experiment({ experimentId }) {
     const [experimentName, setExperimentName] = useState('unnamed experiment')
     const [editingName, setEditingName] = useState(false)
     const [videoUrl, setVideoUrl] = useState(null)
+    const [activeFilename, setActiveFilename] = useState(null)
     // Removed currentStep - using timeline as source of truth
     const [frameData, setFrameData] = useState(null)
     const [bounds, setBounds] = useState({ top: [], bottom: [] })
@@ -72,10 +73,22 @@ function SAM2Experiment({ experimentId }) {
                 // Find the latest video_loaded entry
                 const videoEntry = data.timeline.find(entry => entry.step_type === 'video_loaded')
                 if (videoEntry && videoEntry.data) {
-                    setVideoUrl(videoEntry.data.video_url)
+                    const originalUrl = videoEntry.data.video_url
+                    const filename = originalUrl.split('/').pop()
+                    setActiveFilename(filename)
+
+                    // Fetch video as blob to bypass tainted canvas issues
+                    try {
+                        const blobResponse = await fetch(originalUrl)
+                        const blob = await blobResponse.blob()
+                        const objectUrl = URL.createObjectURL(blob)
+                        setVideoUrl(objectUrl)
+                    } catch (blobError) {
+                        console.error('Error fetching video blob:', blobError)
+                        setVideoUrl(originalUrl) // Fallback
+                    }
 
                     // Re-trigger video loading to get bounds
-                    const filename = videoEntry.data.video_url.split('/').pop()
                     try {
                         const boundsResponse = await fetch(`http://localhost:8000/detect-field-corners?filename=${filename}`, {
                             method: 'POST'
@@ -138,6 +151,15 @@ function SAM2Experiment({ experimentId }) {
             console.error('Error saving timeline entry:', error)
         }
     }
+
+    // Cleanup object URLs to prevent memory leaks
+    useEffect(() => {
+        return () => {
+            if (videoUrl && videoUrl.startsWith('blob:')) {
+                URL.revokeObjectURL(videoUrl)
+            }
+        }
+    }, [videoUrl])
 
     const updateExperimentName = async (newName) => {
         try {
@@ -240,9 +262,23 @@ function SAM2Experiment({ experimentId }) {
     // Step 1: Load video and detect axis-aligned field bounds
     const handleVideoLoaded = async (url, videoType = 'uploaded') => {
         console.log('handleVideoLoaded called with url:', url)
-        setVideoUrl(url)
+
         setError(null)
         const filename = url.split('/').pop()
+        setActiveFilename(filename)
+
+        // Fetch video as blob to bypass tainted canvas issues
+        setIsLoading(true)
+        setLoadingMessage('Loading video stream...')
+        try {
+            const blobResponse = await fetch(url)
+            const blob = await blobResponse.blob()
+            const objectUrl = URL.createObjectURL(blob)
+            setVideoUrl(objectUrl)
+        } catch (blobError) {
+            console.error('Error fetching video blob:', blobError)
+            setVideoUrl(url) // Fallback
+        }
 
         try {
             // Save video to experiment
@@ -542,7 +578,7 @@ function SAM2Experiment({ experimentId }) {
         // Immediate UI feedback
         setActiveDetectionMethod(mode)
 
-        const filename = videoUrl.split('/').pop()
+        const filename = activeFilename
 
         setIsLoading(true)
         setLoadingMessage('Detecting players with YOLO...')
@@ -622,7 +658,7 @@ function SAM2Experiment({ experimentId }) {
 
     // Step 3: Segment players
     const handleSegmentPlayers = async () => {
-        const filename = videoUrl.split('/').pop()
+        const filename = activeFilename
 
         // Display input data
         const inputData = {
@@ -689,7 +725,7 @@ function SAM2Experiment({ experimentId }) {
 
     // Step 4: Segment full video
     const handleSegmentFullVideo = async () => {
-        const filename = videoUrl.split('/').pop()
+        const filename = activeFilename
 
         try {
             setFullVideoProgress({ percent: 0, message: 'Starting full video segmentation...', status: 'starting' })
@@ -741,6 +777,54 @@ function SAM2Experiment({ experimentId }) {
         } catch (error) {
             console.error('Error starting full video segmentation:', error)
             setFullVideoProgress({ percent: 0, message: `Error: ${error.message}`, status: 'error' })
+        }
+    }
+
+    const handleDownloadBitmap = () => {
+        console.log('handleDownloadBitmap triggered');
+        if (!videoRef.current || !canvasRef.current) {
+            console.error('Missing refs:', { video: !!videoRef.current, canvas: !!canvasRef.current });
+            return;
+        }
+
+        try {
+            const video = videoRef.current;
+            const canvas = canvasRef.current;
+
+            console.log('Video dimensions:', video.videoWidth, 'x', video.videoHeight);
+            if (video.videoWidth === 0 || video.videoHeight === 0) {
+                console.warn('Video not ready or has 0 dimensions');
+                return;
+            }
+
+            // Create a temporary canvas at full video resolution
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = video.videoWidth;
+            tempCanvas.height = video.videoHeight;
+            const ctx = tempCanvas.getContext('2d');
+
+            // 1. Draw the current video frame
+            ctx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+
+            // 2. Draw the overlay canvas on top
+            ctx.drawImage(canvas, 0, 0, tempCanvas.width, tempCanvas.height);
+
+            // 3. Trigger download
+            const timestamp = new Date().getTime();
+            const link = document.createElement('a');
+            const downloadName = activeFilename ? `${activeFilename.split('.')[0]}_overlay_${timestamp}.png` : `frame_overlay_${timestamp}.png`;
+            link.download = downloadName;
+            try {
+                link.href = tempCanvas.toDataURL('image/png');
+                console.log('Download link created');
+                link.click();
+            } catch (securityError) {
+                console.error('Security Error (likely CORS):', securityError);
+                setError('Could not download image due to a security restriction (CORS). Please ensure the video server permits cross-origin requests.');
+            }
+        } catch (err) {
+            console.error('Error during bitmap download:', err);
+            setError(`Error downloading bitmap: ${err.message}`);
         }
     }
 
@@ -886,6 +970,22 @@ function SAM2Experiment({ experimentId }) {
                                 // Keep canvas visible across steps where interaction/drawing is needed
                                 style={{ display: videoUrl ? 'block' : 'none' }}
                             />
+                        </div>
+
+                        <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'center' }}>
+                            <button
+                                className="secondary-button"
+                                onClick={handleDownloadBitmap}
+                                style={{
+                                    padding: '8px 20px',
+                                    fontSize: '1rem',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '8px'
+                                }}
+                            >
+                                🖼️ Download Bitmap with Overlays
+                            </button>
                         </div>
 
                         {isLoading && (
