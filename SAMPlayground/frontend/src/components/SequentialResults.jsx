@@ -270,7 +270,7 @@ function SequentialResults({ experiment, bounds, players, segmentResult }) {
                                     <div className="player-items-scroll" style={{ maxHeight: '200px', overflowY: 'auto', background: '#222', padding: '0.5rem', borderRadius: '4px' }}>
                                         {(entry.data.top_players || []).map((p, i) => (
                                             <div key={i} style={{ fontSize: '0.8rem', color: '#aaa', marginBottom: '0.25rem' }}>
-                                                #{i + 1}: ({p.x1}, {p.y1}) → ({p.x2}, {p.y2}) <span style={{ color: '#666' }}>[{p.confidence?.toFixed(2)}]</span>
+                                                #{i + 1}: ({Math.round(p.x1)}, {Math.round(p.y1)}) → ({Math.round(p.x2)}, {Math.round(p.y2)}) <span style={{ color: '#666' }}>[{p.confidence?.toFixed(2)}]</span>
                                             </div>
                                         ))}
                                         {(!entry.data.top_players || entry.data.top_players.length === 0) && <div style={{ fontSize: '0.8rem', color: '#666' }}>No players</div>}
@@ -294,7 +294,7 @@ function SequentialResults({ experiment, bounds, players, segmentResult }) {
                                     <div className="player-items-scroll" style={{ maxHeight: '200px', overflowY: 'auto', background: '#222', padding: '0.5rem', borderRadius: '4px' }}>
                                         {(entry.data.bottom_players || []).map((p, i) => (
                                             <div key={i} style={{ fontSize: '0.8rem', color: '#aaa', marginBottom: '0.25rem' }}>
-                                                #{i + 1}: ({p.x1}, {p.y1}) → ({p.x2}, {p.y2}) <span style={{ color: '#666' }}>[{p.confidence?.toFixed(2)}]</span>
+                                                #{i + 1}: ({Math.round(p.x1)}, {Math.round(p.y1)}) → ({Math.round(p.x2)}, {Math.round(p.y2)}) <span style={{ color: '#666' }}>[{p.confidence?.toFixed(2)}]</span>
                                             </div>
                                         ))}
                                         {(!entry.data.bottom_players || entry.data.bottom_players.length === 0) && <div style={{ fontSize: '0.8rem', color: '#666' }}>No players</div>}
