@@ -720,6 +720,24 @@ function SAM2Experiment({ experimentId }) {
                     if (progressData.status === 'completed') {
                         clearInterval(pollInterval)
                         setFullClipDetectionResult(progressData)
+
+                        // Map mode to readable label
+                        const methodLabels = {
+                            'full': 'Full Frame',
+                            'fop': 'Within FOP',
+                            'los': 'Within LOS',
+                            'grid': 'FOP using Grid'
+                        }
+
+                        // Save to timeline
+                        await saveTimelineEntry('full_clip_detection_completed', {
+                            method: methodLabels[mode] || mode,
+                            total_frames: progressData.total_frames,
+                            file_size: progressData.file_size,
+                            execution_time: progressData.execution_time,
+                            result_url: progressData.result_url,
+                            filename: progressData.filename
+                        })
                     } else if (progressData.status === 'error') {
                         clearInterval(pollInterval)
                         setError(`❌ Detection error: ${progressData.message}`)
@@ -1211,6 +1229,12 @@ function SAM2Experiment({ experimentId }) {
                                             const label = mode === 'Full' ? 'Full Frame' : mode === 'Grid' ? 'FOP using Grid' : `Within ${mode}`
                                             const isRunning = fullClipDetectionProgress?.status === 'processing' || fullClipDetectionProgress?.status === 'starting';
 
+                                            // Find latest full-clip run for this specific mode
+                                            const lastFullRun = experiment?.timeline?.slice().reverse().find(e =>
+                                                e.step_type === 'full_clip_detection_completed' &&
+                                                (e.data?.method === label || e.data?.method === mode)
+                                            )
+
                                             return (
                                                 <button
                                                     key={`clip-${mode}`}
@@ -1230,12 +1254,35 @@ function SAM2Experiment({ experimentId }) {
                                                         borderRadius: idx === 0 ? '4px 0 0 4px' : idx === 3 ? '0 4px 4px 0' : '0',
                                                         color: 'white',
                                                         cursor: (isLoading || isRunning) ? 'not-allowed' : 'pointer',
-                                                        minHeight: '60px',
+                                                        minHeight: '80px',
                                                         transition: 'background-color 0.2s',
                                                         opacity: (isLoading || isRunning) ? 0.6 : 1
                                                     }}
                                                 >
                                                     <span style={{ fontWeight: 500, fontSize: '0.85rem' }}>{label}</span>
+                                                    {lastFullRun && (
+                                                        <div style={{
+                                                            display: 'flex',
+                                                            flexDirection: 'column',
+                                                            alignItems: 'center',
+                                                            marginTop: '6px',
+                                                            gap: '2px'
+                                                        }}>
+                                                            <span style={{
+                                                                fontSize: '0.65rem',
+                                                                opacity: 0.9,
+                                                                whiteSpace: 'nowrap',
+                                                                padding: '1px 5px',
+                                                                background: 'rgba(40,167,69,0.3)',
+                                                                borderRadius: '3px'
+                                                            }}>
+                                                                {lastFullRun.data.execution_time?.toFixed(1)}s | {(lastFullRun.data.file_size / 1024 / 1024).toFixed(2)}MB
+                                                            </span>
+                                                            <span style={{ fontSize: '0.6rem', opacity: 0.5 }}>
+                                                                {new Date(lastFullRun.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                            </span>
+                                                        </div>
+                                                    )}
                                                 </button>
                                             )
                                         })}
@@ -1248,26 +1295,6 @@ function SAM2Experiment({ experimentId }) {
                                             </div>
                                         )}
                                     </div>
-                                    {fullClipDetectionResult && (
-                                        <a
-                                            href={fullClipDetectionResult.result_url}
-                                            download
-                                            className="download-btn"
-                                            style={{
-                                                padding: '8px 15px',
-                                                backgroundColor: '#28a745',
-                                                color: 'white',
-                                                borderRadius: '4px',
-                                                textDecoration: 'none',
-                                                fontSize: '0.8rem',
-                                                alignSelf: 'center',
-                                                fontWeight: 'bold',
-                                                whiteSpace: 'nowrap'
-                                            }}
-                                        >
-                                            Download Clip JSON
-                                        </a>
-                                    )}
                                 </div>
                             </div>
                         )}

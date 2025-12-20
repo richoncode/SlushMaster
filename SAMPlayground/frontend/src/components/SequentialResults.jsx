@@ -150,6 +150,44 @@ function SequentialResults({ experiment, bounds, players, segmentResult }) {
                     </div>
                 )
 
+            case 'full_clip_detection_completed':
+                return (
+                    <div key={entry.id || index} className="result-entry detection-entry full-clip-entry">
+                        <div className="entry-header">
+                            <span className="entry-icon">🎥</span>
+                            <span className="entry-title">Full Clip Detection Complete</span>
+                            {duration && <span className="entry-duration">{duration}</span>}
+                        </div>
+                        <div className="entry-content">
+                            <div className="summary-stats" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
+                                <span className="stat-pill" style={{ padding: '2px 8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', fontSize: '0.85rem' }}>Method: {entry.data.method}</span>
+                                <span className="stat-pill" style={{ padding: '2px 8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', fontSize: '0.85rem' }}>Frames: {entry.data.total_frames}</span>
+                                <span className="stat-pill" style={{ padding: '2px 8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', fontSize: '0.85rem' }}>Time: {entry.data.execution_time?.toFixed(1)}s</span>
+                                <span className="stat-pill" style={{ padding: '2px 8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', fontSize: '0.85rem' }}>Size: {(entry.data.file_size / 1024 / 1024).toFixed(2)} MB</span>
+                            </div>
+                            <div className="entry-actions">
+                                <a
+                                    href={entry.data.result_url}
+                                    download
+                                    className="secondary-button"
+                                    style={{
+                                        textDecoration: 'none',
+                                        backgroundColor: '#28a745',
+                                        color: 'white',
+                                        padding: '6px 15px',
+                                        borderRadius: '4px',
+                                        fontSize: '0.9rem',
+                                        fontWeight: 'bold',
+                                        display: 'inline-block'
+                                    }}
+                                >
+                                    📥 Download Full Results JSON
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                )
+
             case 'players_detected':
                 const boundsEntry = timeline.slice(0, index).reverse().find(e => e.step_type === 'bounds_adjusted')
                 const method = entry.data.method || 'Unknown'

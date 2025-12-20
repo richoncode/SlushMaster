@@ -927,13 +927,18 @@ def detect_players_full_video_task(filename, experiment_id, top_corners, bottom_
         with open(output_path, 'w') as f:
             json.dump(final_data, f)
             
+        file_size = output_path.stat().st_size
+        execution_time = time.time() - start_time
+            
         player_detection_progress[filename] = {
             "status": "completed",
             "percent": 100,
             "message": "Detection complete!",
             "result_url": f"http://localhost:8000/video/{output_filename}",
             "filename": output_filename,
-            "total_frames": total_frames
+            "total_frames": total_frames,
+            "file_size": file_size,
+            "execution_time": execution_time
         }
     except Exception as e:
         player_detection_progress[filename] = {"status": "error", "message": f"Error: {str(e)}"}
