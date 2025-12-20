@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 import shutil
 import os
+import time
+import json
 from pathlib import Path
 import cv2
 import torch
@@ -102,6 +104,7 @@ processing_logs = {} # filename -> list of log strings
 
 # Progress tracking for full video segmentation
 segmentation_progress = {}  # filename -> {status, current_frame, total_frames, message, error}
+player_detection_progress = {} # filename -> {status, current_frame, total_frames, message, error}
 
 def log_event(filename: str, message: str):
     if filename not in processing_logs:
@@ -410,219 +413,110 @@ def calculate_los_aabb(p1, p2, p3, p4, t, margin=40):
         'y2': max_y + margin
     }
 
+def execute_detection(img, corners, y_offset, view_name, detection_mode, los_position=0.5):
+    # Determine detection region based on mode
+    region_corners = corners # Default to fop
+    
+    if detection_mode == 'full':
+        h, w = img.shape[:2]
+        region_corners = [{'x': 0, 'y': 0}, {'x': w, 'y': 0}, {'x': w, 'y': h}, {'x': 0, 'y': h}]
+    elif detection_mode == 'los' and len(corners) == 4:
+        aabb = calculate_los_aabb(corners[0], corners[1], corners[2], corners[3], los_position)
+        if aabb:
+            xl, yl, xr, yr = max(0, int(aabb['x1'])), max(0, int(aabb['y1'] - y_offset)), min(img.shape[1], int(aabb['x2'])), min(img.shape[0], int(aabb['y2'] - y_offset))
+            region_corners = [{'x': xl, 'y': yl}, {'x': xr, 'y': yl}, {'x': xr, 'y': yr}, {'x': xl, 'y': yr}]
+    
+    if detection_mode in ['fop', 'grid']:
+        region_corners = [{'x': c['x'], 'y': c['y'] - y_offset} for c in region_corners]
+
+    # Convert simple list to numpy for boundingRect
+    points = np.array([[c["x"], c["y"]] for c in region_corners], dtype=np.int32)
+    x, y, w, h = cv2.boundingRect(points)
+    x, y = max(0, x), max(0, y)
+    w, h = min(w, img.shape[1] - x), min(h, img.shape[0] - y)
+    if w <= 0 or h <= 0: return [], {"view": view_name, "error": "Invalid region"}
+
+    cropped = img[y:y+h, x:x+w]
+    try:
+        lab = cv2.cvtColor(cropped, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        l = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8)).apply(l)
+        enhanced = cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
+        sharpened = cv2.filter2D(enhanced, -1, np.array([[-1,-1,-1], [-1, 9,-1], [-1,-1,-1]]))
+    except: sharpened = cropped
+
+    if detection_mode == 'grid' and len(region_corners) == 4:
+        p1, p2, p3, p4 = region_corners[0], region_corners[1], region_corners[2], region_corners[3]
+        num_bands, overlap = 10, 0.2
+        band_crops, band_metadata = [], []
+        def lerp_p(a, b, t): return {'x': a['x'] + (b['x'] - a['x']) * t, 'y': a['y'] + (b['y'] - a['y']) * t}
+        for i in range(num_bands):
+            t_start, t_end = max(0, (i / num_bands) - overlap/2), min(1, ((i + 1) / num_bands) + overlap/2)
+            b_corners = [lerp_p(p1, p2, t_start), lerp_p(p1, p2, t_end), lerp_p(p4, p3, t_end), lerp_p(p4, p3, t_start)]
+            bx, by, bw, bh = cv2.boundingRect(np.array([[c['x'], c['y']] for c in b_corners], dtype=np.int32))
+            bx, by = max(0, bx), max(0, by)
+            bw, bh = min(bw, img.shape[1] - bx), min(bh, img.shape[0] - by)
+            if bw > 0 and bh > 0:
+                bcrop = img[by:by+bh, bx:bx+bw]
+                try:
+                    blab = cv2.cvtColor(bcrop, cv2.COLOR_BGR2LAB); bl, ba, bb = cv2.split(blab)
+                    bl = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8)).apply(bl)
+                    benh = cv2.cvtColor(cv2.merge([bl, ba, bb]), cv2.COLOR_LAB2BGR)
+                    bsharp = cv2.filter2D(benh, -1, np.array([[-1,-1,-1], [-1, 9,-1], [-1,-1,-1]]))
+                    band_crops.append(bsharp)
+                except: band_crops.append(bcrop)
+                band_metadata.append({'x': bx, 'y': by})
+        
+        if band_crops:
+            batch_results = get_yolo_model()(band_crops, conf=0.05, verbose=False)
+            band_players = []
+            for idx, result in enumerate(batch_results):
+                meta = band_metadata[idx]
+                for box in result.boxes:
+                    if int(box.cls) == 0:
+                        b_xyxy = box.xyxy[0].cpu().numpy()
+                        band_players.append({'x1': float(b_xyxy[0] + meta['x']), 'y1': float(b_xyxy[1] + meta['y'] + y_offset), 'x2': float(b_xyxy[2] + meta['x']), 'y2': float(b_xyxy[3] + meta['y'] + y_offset), 'confidence': float(box.conf[0].cpu().item())})
+            return apply_nms(band_players), {"view": view_name, "bands": len(band_crops)}
+        return [], {"view": view_name, "error": "No valid bands"}
+
+    model = get_yolo_model()
+    results = model(sharpened, conf=0.05, verbose=False)
+    players = []
+    for result in results:
+        for box in result.boxes:
+            if int(box.cls) == 0:
+                xyxy = box.xyxy[0].cpu().numpy()
+                players.append({"x1": int(xyxy[0] + x), "y1": int(xyxy[1] + y + y_offset), "x2": int(xyxy[2] + x), "y2": int(xyxy[3] + y + y_offset), "confidence": float(box.conf[0])})
+    players.sort(key=lambda p: p["x1"])
+    return players, {"view": view_name, "crop_size": f"{w}x{h}", "detections": len(players)}
+
 @app.post("/detect-players")
 async def detect_players(request: dict):
     """Detect players using YOLOv8 with different modes"""
+    start_time = time.time()
     filename = request.get('filename')
-    top_corners = request.get('top_corners', []) 
-    bottom_corners = request.get('bottom_corners', [])
-    detection_mode = request.get('detection_mode', 'fop')  # 'full', 'fop', 'los', 'grid'
+    top_corners, bottom_corners = request.get('top_corners', []), request.get('bottom_corners', [])
+    detection_mode = request.get('detection_mode', 'fop')
     los_position = request.get('los_position', 0.5)
 
     video_path = UPLOAD_DIR / filename
-    if not video_path.exists():
-        raise HTTPException(status_code=404, detail="Video not found")
-    
-    # Extract first frame
+    if not video_path.exists(): raise HTTPException(status_code=404, detail="Video not found")
     cap = cv2.VideoCapture(str(video_path))
-    ret, frame = cap.read()
-    cap.release()
-    
-    if not ret:
-        raise HTTPException(status_code=500, detail="Failed to read video")
+    ret, frame = cap.read(); cap.release()
+    if not ret: raise HTTPException(status_code=500, detail="Failed to read video")
     
     height, width = frame.shape[:2]
-    top_frame = frame[0:height//2, :].copy()
-    bottom_frame = frame[height//2:, :].copy()
+    top_players, top_metadata = execute_detection(frame[0:height//2, :], top_corners, 0, "Top", detection_mode, los_position)
+    bottom_players, bottom_metadata = execute_detection(frame[height//2:, :], bottom_corners, height//2, "Bottom", detection_mode, los_position)
     
-    def detect_in_region(img, corners, y_offset, view_name):
-        # Determine detection region based on mode
-        region_corners = corners # Default to fop
-        
-        if detection_mode == 'full':
-            h, w = img.shape[:2]
-            # Use full image bounds - these are already local to the img (which is a split frame)
-            # So no y_offset adjustment needed for these generated local corners
-            region_corners = [
-                {'x': 0, 'y': 0},
-                {'x': w, 'y': 0},
-                {'x': w, 'y': h},
-                {'x': 0, 'y': h}
-            ]
-        elif detection_mode == 'los':
-             # corners are P1, P2, P3, P4
-             if len(corners) == 4:
-                 p1, p2, p3, p4 = corners[0], corners[1], corners[2], corners[3]
-                 aabb = calculate_los_aabb(p1, p2, p3, p4, los_position)
-                 
-                 if aabb:
-                     h, w = img.shape[:2]
-                     # aabb is in GLOBAL coordinates (e.g. y=3000 for bottom view)
-                     # We must convert to local coordinates relative to the split image
-                     
-                     x1 = max(0, int(aabb['x1']))
-                     y1 = max(0, int(aabb['y1'] - y_offset))
-                     x2 = min(w, int(aabb['x2']))
-                     y2 = min(h, int(aabb['y2'] - y_offset))
-                     
-                     region_corners = [
-                         {'x': x1, 'y': y1},
-                         {'x': x2, 'y': y1},
-                         {'x': x2, 'y': y2},
-                         {'x': x1, 'y': y2}
-                     ]
-        
-        # If using 'fop' or 'grid', region_corners are global corners passed in.
-        # We need to adjust them to local frame coords if they haven't been processed above
-        if detection_mode in ['fop', 'grid']:
-             local_corners = []
-             for c in region_corners:
-                 local_corners.append({
-                     'x': c['x'],
-                     'y': c['y'] - y_offset
-                 })
-             region_corners = local_corners
-
-        # Convert simple list to numpy for boundingRect
-        points = np.array([[c["x"], c["y"]] for c in region_corners], dtype=np.int32)
-        x, y, w, h = cv2.boundingRect(points)
-        
-        # Ensure valid crop within the image
-        x = max(0, x)
-        y = max(0, y)
-        w = min(w, img.shape[1] - x)
-        h = min(h, img.shape[0] - y)
-        
-        if w <= 0 or h <= 0:
-            return [], {"view": view_name, "error": "Invalid region"}
-
-        # Crop to bounding rect of region
-        cropped = img[y:y+h, x:x+w]
-        
-        # Preprocess: Enhance contrast and sharpness for better small object detection
-        # Convert to LAB color space for better contrast control
-        try:
-            lab = cv2.cvtColor(cropped, cv2.COLOR_BGR2LAB)
-            l, a, b = cv2.split(lab)
-            
-            # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) to L channel
-            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
-            l = clahe.apply(l)
-            
-            # Merge and convert back
-            enhanced = cv2.merge([l, a, b])
-            enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
-            
-            # Sharpen the image
-            kernel = np.array([[-1,-1,-1],
-                            [-1, 9,-1],
-                            [-1,-1,-1]])
-            sharpened = cv2.filter2D(enhanced, -1, kernel)
-        except Exception:
-            sharpened = cropped # Fallback if empty
-        
-        # Run YOLO with very low confidence threshold for distant small objects
-        if detection_mode == 'grid' and len(region_corners) == 4:
-            p1, p2, p3, p4 = region_corners[0], region_corners[1], region_corners[2], region_corners[3]
-            num_bands = 10
-            overlap = 0.2
-            band_crops = []
-            band_metadata = []
-            
-            for i in range(num_bands):
-                t_start = max(0, (i / num_bands) - overlap/2)
-                t_end = min(1, ((i + 1) / num_bands) + overlap/2)
-                
-                def lerp_p(a, b, t):
-                    return {'x': a['x'] + (b['x'] - a['x']) * t, 'y': a['y'] + (b['y'] - a['y']) * t}
-                
-                b_corners = [lerp_p(p1, p2, t_start), lerp_p(p1, p2, t_end), lerp_p(p4, p3, t_end), lerp_p(p4, p3, t_start)]
-                bx, by, bw, bh = cv2.boundingRect(np.array([[c['x'], c['y']] for c in b_corners], dtype=np.int32))
-                bx, by = max(0, bx), max(0, by)
-                bw, bh = min(bw, img.shape[1] - bx), min(bh, img.shape[0] - by)
-                
-                if bw > 0 and bh > 0:
-                    crop = img[by:by+bh, bx:bx+bw]
-                    try:
-                        lab = cv2.cvtColor(crop, cv2.COLOR_BGR2LAB)
-                        l, a, b = cv2.split(lab)
-                        l = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8)).apply(l)
-                        enhanced = cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
-                        sharpened_band = cv2.filter2D(enhanced, -1, np.array([[-1,-1,-1], [-1, 9,-1], [-1,-1,-1]]))
-                        band_crops.append(sharpened_band)
-                    except: band_crops.append(crop)
-                    band_metadata.append({'x': bx, 'y': by})
-            
-            if band_crops:
-                batch_results = get_yolo_model()(band_crops, conf=0.05, verbose=False)
-                band_players = []
-                for idx, result in enumerate(batch_results):
-                    meta = band_metadata[idx]
-                    for box in result.boxes:
-                        if int(box.cls) == 0:
-                            b_xyxy = box.xyxy[0].cpu().numpy()
-                            band_players.append({
-                                'x1': float(b_xyxy[0] + meta['x']),
-                                'y1': float(b_xyxy[1] + meta['y'] + y_offset),
-                                'x2': float(b_xyxy[2] + meta['x']),
-                                'y2': float(b_xyxy[3] + meta['y'] + y_offset),
-                                'confidence': float(box.conf[0].cpu().item())
-                            })
-                return apply_nms(band_players), {"view": view_name, "bands": len(band_crops)}
-            return [], {"view": view_name, "error": "No valid bands"}
-
-        # Original single-crop detection
-        model = get_yolo_model()
-        results = model(sharpened, conf=0.05, verbose=False)  # Lowered to 0.05
-        
-        players = []
-        for result in results:
-            for box in result.boxes:
-                if int(box.cls) == 0:  # person
-                    xyxy = box.xyxy[0].cpu().numpy()
-                    players.append({
-                        "x1": int(xyxy[0] + x),
-                        "y1": int(xyxy[1] + y + y_offset),
-                        "x2": int(xyxy[2] + x),
-                        "y2": int(xyxy[3] + y + y_offset),
-                        "confidence": float(box.conf[0])
-                    })
-        
-        # Sort by x position (left to right)
-        players.sort(key=lambda p: p["x1"])
-        
-        metadata = {
-            "view": view_name,
-            "crop_size": f"{w}x{h}",
-            "detections": len(players)
-        }
-        
-        return players, metadata
-    
-    top_players, top_metadata = detect_in_region(top_frame, top_corners, 0, "Left (Top)")
-    bottom_players, bottom_metadata = detect_in_region(bottom_frame, bottom_corners, height//2, "Right (Bottom)")
-    
-    # Calculate similarity (simple count comparison)
     similarity = 1.0 - abs(len(top_players) - len(bottom_players)) / max(len(top_players), len(bottom_players), 1)
-    
     return {
-        "top_players": top_players,
-        "bottom_players": bottom_players,
-        "similarity": similarity,
+        "top_players": top_players, "bottom_players": bottom_players, "similarity": similarity,
         "metadata": {
-            "model": "yolov8m",
-            "detection_mode": detection_mode,
-            "confidence_threshold": 0.05,
-            "preprocessing": "CLAHE + Sharpening",
-            "frame_size": f"{width}x{height}",
-            "top_view": top_metadata,
-            "bottom_view": bottom_metadata,
-            "detected_separately": True,
-            "frame_number": 0,
-            "video_timestamp": 0.0
+            "model": "yolov8m", "detection_mode": detection_mode, "confidence_threshold": 0.05,
+            "top_view": top_metadata, "bottom_view": bottom_metadata, "execution_time": time.time() - start_time
         }
     }
-
 @app.post("/segment-first-frame")
 def segment_first_frame(request: dict):
     """Segment players on first frame using SAM 2"""
@@ -978,6 +872,86 @@ async def get_segment_progress(filename: str):
         "total_frames": 0,
         "percent": 0
     }
+
+def detect_players_full_video_task(filename, experiment_id, top_corners, bottom_corners, detection_mode, los_position):
+    try:
+        video_path = UPLOAD_DIR / filename
+        cap = cv2.VideoCapture(str(video_path))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        
+        all_frames_results = []
+        frame_idx = 0
+        start_time = time.time()
+        
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret: break
+            
+            h, w = frame.shape[:2]
+            top_players, _ = execute_detection(frame[:h//2, :], top_corners, 0, "Top", detection_mode, los_position)
+            bottom_players, _ = execute_detection(frame[h//2:, :], bottom_corners, h//2, "Bottom", detection_mode, los_position)
+            
+            timestamp = frame_idx / fps
+            all_frames_results.append({
+                "frame": frame_idx,
+                "timestamp": timestamp,
+                "top_players": top_players,
+                "bottom_players": bottom_players
+            })
+            
+            frame_idx += 1
+            if frame_idx % 10 == 0:
+                player_detection_progress[filename] = {
+                    "status": "processing",
+                    "percent": int((frame_idx / total_frames) * 100),
+                    "message": f"Processing frame {frame_idx}/{total_frames}...",
+                    "current_frame": frame_idx,
+                    "total_frames": total_frames
+                }
+        
+        cap.release()
+        
+        output_filename = f"detection_results_{filename}_{int(time.time())}.json"
+        output_path = Path("backend/uploads") / output_filename
+        
+        final_data = {
+            "experiment_id": experiment_id,
+            "filename": filename,
+            "detection_mode": detection_mode,
+            "total_frames": total_frames,
+            "results": all_frames_results,
+            "execution_time": time.time() - start_time
+        }
+        
+        with open(output_path, 'w') as f:
+            json.dump(final_data, f)
+            
+        player_detection_progress[filename] = {
+            "status": "completed",
+            "percent": 100,
+            "message": "Detection complete!",
+            "result_url": f"http://localhost:8000/video/{output_filename}",
+            "filename": output_filename,
+            "total_frames": total_frames
+        }
+    except Exception as e:
+        player_detection_progress[filename] = {"status": "error", "message": f"Error: {str(e)}"}
+
+@app.post("/detect-players-full-video")
+async def detect_players_full_video(request: dict, background_tasks: BackgroundTasks):
+    filename = request.get('filename')
+    experiment_id = request.get('experiment_id')
+    top_corners, bottom_corners = request.get('top_corners', []), request.get('bottom_corners', [])
+    detection_mode, los_position = request.get('detection_mode', 'fop'), request.get('los_position', 0.5)
+    
+    player_detection_progress[filename] = {"status": "starting", "percent": 0, "message": "Starting video detection..."}
+    background_tasks.add_task(detect_players_full_video_task, filename, experiment_id, top_corners, bottom_corners, detection_mode, los_position)
+    return {"status": "processing", "message": "Started full video detection"}
+
+@app.get("/detection-progress/{filename}")
+async def get_detection_progress(filename: str):
+    return player_detection_progress.get(filename, {"status": "not_found"})
 
 # ===== EXPERIMENT MANAGEMENT ENDPOINTS =====
 

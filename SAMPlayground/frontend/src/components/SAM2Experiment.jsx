@@ -9,6 +9,7 @@ function SAM2Experiment({ experimentId }) {
     const [experimentName, setExperimentName] = useState('unnamed experiment')
     const [editingName, setEditingName] = useState(false)
     const [videoUrl, setVideoUrl] = useState(null)
+    const [videoDuration, setVideoDuration] = useState(0)
     const [activeFilename, setActiveFilename] = useState(null)
     // Removed currentStep - using timeline as source of truth
     const [frameData, setFrameData] = useState(null)
@@ -20,6 +21,8 @@ function SAM2Experiment({ experimentId }) {
     const [fullVideoMessage, setFullVideoMessage] = useState('')
     const [fullVideoProgress, setFullVideoProgress] = useState(null) // {percent, message, status}
     const [fullVideoResult, setFullVideoResult] = useState(null) // Result URL when complete
+    const [fullClipDetectionProgress, setFullClipDetectionProgress] = useState(null) // {percent, message, status}
+    const [fullClipDetectionResult, setFullClipDetectionResult] = useState(null) // Download JSON info
     const [error, setError] = useState(null) // Global error state
     const [errorLog, setErrorLog] = useState([]) // Track all errors
     const [draggingBound, setDraggingBound] = useState(null)
@@ -66,6 +69,8 @@ function SAM2Experiment({ experimentId }) {
             const data = await response.json()
             setExperiment(data)
             setExperimentName(data.name)
+            setFullClipDetectionProgress(null)
+            setFullClipDetectionResult(null)
 
             // Restore UI state from timeline ONLY if requested (initial load)
             // This prevents race conditions where saveTimelineEntry triggers restoration that conflicts with ongoing actions
@@ -83,6 +88,12 @@ function SAM2Experiment({ experimentId }) {
                         const blob = await blobResponse.blob()
                         const objectUrl = URL.createObjectURL(blob)
                         setVideoUrl(objectUrl)
+                        // Capture duration
+                        const tempVideo = document.createElement('video');
+                        tempVideo.src = objectUrl;
+                        tempVideo.onloadedmetadata = () => {
+                            setVideoDuration(tempVideo.duration);
+                        };
                     } catch (blobError) {
                         console.error('Error fetching video blob:', blobError)
                         setVideoUrl(originalUrl) // Fallback
@@ -266,6 +277,8 @@ function SAM2Experiment({ experimentId }) {
         setError(null)
         const filename = url.split('/').pop()
         setActiveFilename(filename)
+        setFullClipDetectionProgress(null)
+        setFullClipDetectionResult(null)
 
         // Fetch video as blob to bypass tainted canvas issues
         setIsLoading(true)
@@ -275,6 +288,13 @@ function SAM2Experiment({ experimentId }) {
             const blob = await blobResponse.blob()
             const objectUrl = URL.createObjectURL(blob)
             setVideoUrl(objectUrl)
+
+            // Get duration once blob is loaded
+            const tempVideo = document.createElement('video');
+            tempVideo.src = objectUrl;
+            tempVideo.onloadedmetadata = () => {
+                setVideoDuration(tempVideo.duration);
+            };
         } catch (blobError) {
             console.error('Error fetching video blob:', blobError)
             setVideoUrl(url) // Fallback
@@ -654,6 +674,65 @@ function SAM2Experiment({ experimentId }) {
             // DON'T reset currentStep - stay on current step and show error
         } finally {
             setIsLoading(false)
+        }
+    }
+
+    const handleDetectPlayersFullVideo = async (mode = 'fop') => {
+        const filename = activeFilename
+        if (!filename) return
+
+        setFullClipDetectionProgress({ percent: 0, message: 'Initializing...', status: 'starting' })
+        setFullClipDetectionResult(null)
+
+        try {
+            const response = await fetch('http://localhost:8000/detect-players-full-video', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    filename,
+                    experiment_id: experimentId,
+                    top_corners: bounds.top,
+                    bottom_corners: bounds.bottom,
+                    detection_mode: mode,
+                    los_position: losPosition
+                })
+            })
+
+            if (!response.ok) {
+                const errorText = await response.text()
+                throw new Error(`Failed to start full video detection: ${errorText}`)
+            }
+
+            // Start polling for progress
+            const pollInterval = setInterval(async () => {
+                try {
+                    const progressResponse = await fetch(`http://localhost:8000/detection-progress/${filename}`)
+                    const progressData = await progressResponse.json()
+
+                    setFullClipDetectionProgress({
+                        percent: progressData.percent || 0,
+                        message: progressData.message || 'Processing...',
+                        status: progressData.status,
+                        current_frame: progressData.current_frame,
+                        total_frames: progressData.total_frames
+                    })
+
+                    if (progressData.status === 'completed') {
+                        clearInterval(pollInterval)
+                        setFullClipDetectionResult(progressData)
+                    } else if (progressData.status === 'error') {
+                        clearInterval(pollInterval)
+                        setError(`❌ Detection error: ${progressData.message}`)
+                    }
+                } catch (error) {
+                    console.error('Error polling detection progress:', error)
+                }
+            }, 1000)
+
+        } catch (error) {
+            console.error('Error starting full video detection:', error)
+            setFullClipDetectionProgress({ percent: 0, message: `Error: ${error.message}`, status: 'error' })
+            setError(error.message)
         }
     }
 
@@ -1050,6 +1129,22 @@ function SAM2Experiment({ experimentId }) {
 
                                             const isActive = activeDetectionMethod === modeId
 
+                                            // Calc estimate using state duration OR video ref duration as fallback
+                                            const activeDuration = videoDuration || videoRef.current?.duration || 0;
+
+                                            const estTimeSec = (lastRun && activeDuration)
+                                                ? (lastRun.data.execution_time * (activeDuration * 30)).toFixed(0)
+                                                : 0;
+
+                                            const estHours = Math.floor(estTimeSec / 3600);
+                                            const estMins = Math.floor((estTimeSec % 3600) / 60);
+                                            const estSecs = estTimeSec % 60;
+                                            const estStr = estHours > 0
+                                                ? `${estHours}h ${estMins}m`
+                                                : estMins > 0
+                                                    ? `${estMins}m ${estSecs}s`
+                                                    : `${estSecs}s`;
+
                                             return (
                                                 <button
                                                     key={mode}
@@ -1069,23 +1164,33 @@ function SAM2Experiment({ experimentId }) {
                                                         borderRadius: idx === 0 ? '4px 0 0 4px' : idx === 3 ? '0 4px 4px 0' : '0',
                                                         color: 'white',
                                                         cursor: 'pointer',
-                                                        minHeight: '60px',
+                                                        minHeight: '80px',
                                                         transition: 'background-color 0.2s'
                                                     }}
                                                 >
                                                     <span style={{ fontWeight: 500, fontSize: '0.95rem' }}>{label}</span>
                                                     {lastRun ? (
-                                                        <span style={{
-                                                            fontSize: '0.75rem',
-                                                            opacity: 0.9,
+                                                        <div style={{
+                                                            display: 'flex',
+                                                            flexDirection: 'column',
+                                                            alignItems: 'center',
                                                             marginTop: '6px',
-                                                            padding: '2px 6px',
-                                                            background: 'rgba(0,0,0,0.2)',
-                                                            borderRadius: '3px',
-                                                            whiteSpace: 'nowrap'
+                                                            gap: '2px'
                                                         }}>
-                                                            {lastRun.data.execution_time?.toFixed(1)}s | L:{lastRun.data.top_count} R:{lastRun.data.bottom_count}
-                                                        </span>
+                                                            <span style={{
+                                                                fontSize: '0.75rem',
+                                                                opacity: 0.9,
+                                                                padding: '1px 6px',
+                                                                background: 'rgba(0,0,0,0.2)',
+                                                                borderRadius: '3px',
+                                                                whiteSpace: 'nowrap'
+                                                            }}>
+                                                                {lastRun.data.execution_time?.toFixed(1)}s | L:{lastRun.data.top_count} R:{lastRun.data.bottom_count}
+                                                            </span>
+                                                            <span style={{ fontSize: '0.65rem', opacity: 0.7, whiteSpace: 'nowrap' }}>
+                                                                Clip: {activeDuration > 0 ? activeDuration.toFixed(1) : '?.?'}s | Est: {activeDuration > 0 ? estStr : '...'}
+                                                            </span>
+                                                        </div>
                                                     ) : (
                                                         <span style={{ fontSize: '0.7rem', opacity: 0.4, marginTop: '6px' }}>
                                                             Not run
@@ -1095,6 +1200,74 @@ function SAM2Experiment({ experimentId }) {
                                             )
                                         })}
                                     </div>
+                                </div>
+
+                                {/* Entire Clip Detection Row */}
+                                <div className="button-group" style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                                    <span style={{ color: '#ccc', fontSize: '0.9rem', minWidth: '100px', alignSelf: 'center' }}>Entire Clip:</span>
+                                    <div style={{ display: 'flex', flex: 1, position: 'relative' }}>
+                                        {['Full', 'FOP', 'LOS', 'Grid'].map((mode, idx) => {
+                                            const modeId = mode.toLowerCase()
+                                            const label = mode === 'Full' ? 'Full Frame' : mode === 'Grid' ? 'FOP using Grid' : `Within ${mode}`
+                                            const isRunning = fullClipDetectionProgress?.status === 'processing' || fullClipDetectionProgress?.status === 'starting';
+
+                                            return (
+                                                <button
+                                                    key={`clip-${mode}`}
+                                                    onClick={() => handleDetectPlayersFullVideo(modeId)}
+                                                    disabled={isLoading || isRunning}
+                                                    style={{
+                                                        flex: 1,
+                                                        display: 'flex',
+                                                        flexDirection: 'column',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                        padding: '10px 12px',
+                                                        backgroundColor: '#222',
+                                                        border: '1px solid #555',
+                                                        borderRight: idx < 3 ? 'none' : '1px solid #555',
+                                                        borderLeft: idx > 0 ? 'none' : '1px solid #555',
+                                                        borderRadius: idx === 0 ? '4px 0 0 4px' : idx === 3 ? '0 4px 4px 0' : '0',
+                                                        color: 'white',
+                                                        cursor: (isLoading || isRunning) ? 'not-allowed' : 'pointer',
+                                                        minHeight: '60px',
+                                                        transition: 'background-color 0.2s',
+                                                        opacity: (isLoading || isRunning) ? 0.6 : 1
+                                                    }}
+                                                >
+                                                    <span style={{ fontWeight: 500, fontSize: '0.85rem' }}>{label}</span>
+                                                </button>
+                                            )
+                                        })}
+                                        {fullClipDetectionProgress && fullClipDetectionProgress.status !== 'completed' && (
+                                            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '4px', zIndex: 10 }}>
+                                                <div style={{ textAlign: 'center' }}>
+                                                    <div style={{ fontSize: '0.8rem', color: '#646cff', fontWeight: 'bold' }}>{fullClipDetectionProgress.percent}%</div>
+                                                    <div style={{ fontSize: '0.6rem', color: '#ccc', whiteSpace: 'nowrap' }}>{fullClipDetectionProgress.message}</div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                    {fullClipDetectionResult && (
+                                        <a
+                                            href={fullClipDetectionResult.result_url}
+                                            download
+                                            className="download-btn"
+                                            style={{
+                                                padding: '8px 15px',
+                                                backgroundColor: '#28a745',
+                                                color: 'white',
+                                                borderRadius: '4px',
+                                                textDecoration: 'none',
+                                                fontSize: '0.8rem',
+                                                alignSelf: 'center',
+                                                fontWeight: 'bold',
+                                                whiteSpace: 'nowrap'
+                                            }}
+                                        >
+                                            Download Clip JSON
+                                        </a>
+                                    )}
                                 </div>
                             </div>
                         )}
