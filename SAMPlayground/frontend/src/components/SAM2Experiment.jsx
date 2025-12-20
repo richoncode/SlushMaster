@@ -625,7 +625,8 @@ function SAM2Experiment({ experimentId }) {
             const methodLabels = {
                 'full': 'Full Frame',
                 'fop': 'Within FOP',
-                'los': 'Within LOS'
+                'los': 'Within LOS',
+                'grid': 'FOP using Grid'
             }
 
             // Save timeline entry with full player bbox data AND execution time
@@ -1033,9 +1034,13 @@ function SAM2Experiment({ experimentId }) {
                                 <div className="button-group" style={{ display: 'flex', gap: '10px' }}>
                                     <span style={{ color: '#ccc', fontSize: '0.9rem', minWidth: '100px', alignSelf: 'center' }}>Detect Players:</span>
                                     <div style={{ display: 'flex', flex: 1 }}>
-                                        {['Full', 'FOP', 'LOS'].map((mode, idx) => {
+                                        {['Full', 'FOP', 'LOS', 'Grid'].map((mode, idx) => {
                                             const modeId = mode.toLowerCase()
-                                            const label = mode === 'Full' ? 'Full Frame' : `Within ${mode}`
+                                            const label = mode === 'Full'
+                                                ? 'Full Frame'
+                                                : mode === 'Grid'
+                                                    ? 'FOP using Grid'
+                                                    : `Within ${mode}`
 
                                             // Find latest result for this specific mode
                                             const lastRun = experiment?.timeline?.slice().reverse().find(e =>
@@ -1059,9 +1064,9 @@ function SAM2Experiment({ experimentId }) {
                                                         padding: '10px 12px',
                                                         backgroundColor: isActive ? '#646cff' : '#444',
                                                         border: '1px solid #555',
-                                                        borderRight: idx < 2 ? 'none' : '1px solid #555',
+                                                        borderRight: idx < 3 ? 'none' : '1px solid #555',
                                                         borderLeft: idx > 0 ? 'none' : '1px solid #555',
-                                                        borderRadius: idx === 0 ? '4px 0 0 4px' : idx === 2 ? '0 4px 4px 0' : '0',
+                                                        borderRadius: idx === 0 ? '4px 0 0 4px' : idx === 3 ? '0 4px 4px 0' : '0',
                                                         color: 'white',
                                                         cursor: 'pointer',
                                                         minHeight: '60px',

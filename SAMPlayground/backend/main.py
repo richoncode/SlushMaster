@@ -51,6 +51,46 @@ def get_yolo_model():
         yolo_model = YOLO("yolov8m.pt")
     return yolo_model
 
+def apply_nms(boxes, iou_threshold=0.45):
+    """
+    Apply Non-Maximum Suppression to a list of player boxes.
+    Each box is a dict with x1, y1, x2, y2, confidence.
+    """
+    if not boxes:
+        return []
+        
+    # Pick top quality first
+    boxes = sorted(boxes, key=lambda x: x['confidence'], reverse=True)
+    keep = []
+    
+    while boxes:
+        best = boxes.pop(0)
+        keep.append(best)
+        
+        remaining = []
+        for box in boxes:
+            # Intersection
+            ix1 = max(best['x1'], box['x1'])
+            iy1 = max(best['y1'], box['y1'])
+            ix2 = min(best['x2'], box['x2'])
+            iy2 = min(best['y2'], box['y2'])
+            
+            iw = max(0, ix2 - ix1)
+            ih = max(0, iy2 - iy1)
+            inter = iw * ih
+            
+            # Union
+            area1 = (best['x2'] - best['x1']) * (best['y2'] - best['y1'])
+            area2 = (box['x2'] - box['x1']) * (box['y2'] - box['y1'])
+            union = area1 + area2 - inter
+            
+            iou = inter / union if union > 0 else 0
+            if iou < iou_threshold:
+                remaining.append(box)
+        boxes = remaining
+        
+    return keep
+
 # SAM 2 models
 sam2_checkpoint = "sam2_hiera_large.pt"
 model_cfg = "sam2_hiera_l.yaml"  # Use model_cfg consistently
@@ -376,7 +416,7 @@ async def detect_players(request: dict):
     filename = request.get('filename')
     top_corners = request.get('top_corners', []) 
     bottom_corners = request.get('bottom_corners', [])
-    detection_mode = request.get('detection_mode', 'fop')  # 'full', 'fop', 'los'
+    detection_mode = request.get('detection_mode', 'fop')  # 'full', 'fop', 'los', 'grid'
     los_position = request.get('los_position', 0.5)
 
     video_path = UPLOAD_DIR / filename
@@ -432,9 +472,9 @@ async def detect_players(request: dict):
                          {'x': x1, 'y': y2}
                      ]
         
-        # If using 'fop' (default), region_corners are global corners passed in.
+        # If using 'fop' or 'grid', region_corners are global corners passed in.
         # We need to adjust them to local frame coords if they haven't been processed above
-        if detection_mode == 'fop':
+        if detection_mode in ['fop', 'grid']:
              local_corners = []
              for c in region_corners:
                  local_corners.append({
@@ -482,6 +522,56 @@ async def detect_players(request: dict):
             sharpened = cropped # Fallback if empty
         
         # Run YOLO with very low confidence threshold for distant small objects
+        if detection_mode == 'grid' and len(region_corners) == 4:
+            p1, p2, p3, p4 = region_corners[0], region_corners[1], region_corners[2], region_corners[3]
+            num_bands = 10
+            overlap = 0.2
+            band_crops = []
+            band_metadata = []
+            
+            for i in range(num_bands):
+                t_start = max(0, (i / num_bands) - overlap/2)
+                t_end = min(1, ((i + 1) / num_bands) + overlap/2)
+                
+                def lerp_p(a, b, t):
+                    return {'x': a['x'] + (b['x'] - a['x']) * t, 'y': a['y'] + (b['y'] - a['y']) * t}
+                
+                b_corners = [lerp_p(p1, p2, t_start), lerp_p(p1, p2, t_end), lerp_p(p4, p3, t_end), lerp_p(p4, p3, t_start)]
+                bx, by, bw, bh = cv2.boundingRect(np.array([[c['x'], c['y']] for c in b_corners], dtype=np.int32))
+                bx, by = max(0, bx), max(0, by)
+                bw, bh = min(bw, img.shape[1] - bx), min(bh, img.shape[0] - by)
+                
+                if bw > 0 and bh > 0:
+                    crop = img[by:by+bh, bx:bx+bw]
+                    try:
+                        lab = cv2.cvtColor(crop, cv2.COLOR_BGR2LAB)
+                        l, a, b = cv2.split(lab)
+                        l = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8)).apply(l)
+                        enhanced = cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
+                        sharpened_band = cv2.filter2D(enhanced, -1, np.array([[-1,-1,-1], [-1, 9,-1], [-1,-1,-1]]))
+                        band_crops.append(sharpened_band)
+                    except: band_crops.append(crop)
+                    band_metadata.append({'x': bx, 'y': by})
+            
+            if band_crops:
+                batch_results = get_yolo_model()(band_crops, conf=0.05, verbose=False)
+                band_players = []
+                for idx, result in enumerate(batch_results):
+                    meta = band_metadata[idx]
+                    for box in result.boxes:
+                        if int(box.cls) == 0:
+                            b_xyxy = box.xyxy[0].cpu().numpy()
+                            band_players.append({
+                                'x1': float(b_xyxy[0] + meta['x']),
+                                'y1': float(b_xyxy[1] + meta['y'] + y_offset),
+                                'x2': float(b_xyxy[2] + meta['x']),
+                                'y2': float(b_xyxy[3] + meta['y'] + y_offset),
+                                'confidence': float(box.conf[0].cpu().item())
+                            })
+                return apply_nms(band_players), {"view": view_name, "bands": len(band_crops)}
+            return [], {"view": view_name, "error": "No valid bands"}
+
+        # Original single-crop detection
         model = get_yolo_model()
         results = model(sharpened, conf=0.05, verbose=False)  # Lowered to 0.05
         
@@ -490,35 +580,11 @@ async def detect_players(request: dict):
             for box in result.boxes:
                 if int(box.cls) == 0:  # person
                     xyxy = box.xyxy[0].cpu().numpy()
-                    
-                    # Transform back to original frame coordinates
-                    # xyxy is relative to crop
-                    
-                    global_x1 = int(xyxy[0] + x)
-                    global_y1 = int(xyxy[1] + y + y_offset)
-                    global_x2 = int(xyxy[2] + x)
-                    global_y2 = int(xyxy[3] + y + y_offset)
-                    
-                    # Center point for filtering
-                    cx = (global_x1 + global_x2) / 2
-                    cy = (global_y1 + global_y2) / 2
-                    
-                    # Logic to check if INSIDE the region_corners polygon
-                    # If mode is full or los (rect), boundingRect check is enough (which we did by cropping)
-                    # If mode is fop (trapezoid), we technically detect inside the boundingRect
-                    # In original code, it just cropped to boundingRect. 
-                    # If we want strict "within FOP", we should check point polygon test.
-                    # But the requirement implies comparing "approaches". 
-                    # Since existing code just cropped to boundingRect of corners, I will maintain that for consistency unless 'fop' implies strict poly check.
-                    # Actually, for 'los' (rect) and 'full' (rect), the crop is exact.
-                    # For 'fop' (trapezoid), crop includes some outside areas.
-                    # I will stick to crop-based detection for now as it's the established pattern.
-                    
                     players.append({
-                        "x1": global_x1,
-                        "y1": global_y1,
-                        "x2": global_x2,
-                        "y2": global_y2,
+                        "x1": int(xyxy[0] + x),
+                        "y1": int(xyxy[1] + y + y_offset),
+                        "x2": int(xyxy[2] + x),
+                        "y2": int(xyxy[3] + y + y_offset),
                         "confidence": float(box.conf[0])
                     })
         
