@@ -912,15 +912,47 @@ def detect_players_full_video_task(filename, experiment_id, top_corners, bottom_
         
         cap.release()
         
+        # Format labels to match frontend
+        method_labels = {
+            'full': 'Full Frame',
+            'fop': 'Within FOP',
+            'los': 'Within LOS',
+            'grid': 'FOP using Grid'
+        }
+        
+        def transform_player(p):
+            return {
+                "centerX": int(round((p['x1'] + p['x2']) / 2)),
+                "centerY": int(round((p['y1'] + p['y2']) / 2)),
+                "radiusX": int(round((p['x2'] - p['x1']) / 2)),
+                "radiusY": int(round((p['y2'] - p['y1']) / 2)),
+                "confidence": float(f"{p.get('confidence', 0):.4f}")
+            }
+
+        transformed_results = []
+        for r in all_frames_results:
+            transformed_results.append({
+                "frameNumber": r["frame"],
+                "videoTimestamp": float(f"{r['timestamp']:.4f}"),
+                "left_view": [transform_player(p) for p in r["top_players"]],
+                "right_view": [transform_player(p) for p in r["bottom_players"]]
+            })
+
         output_filename = f"detection_results_{filename}_{int(time.time())}.json"
         output_path = Path("backend/uploads") / output_filename
         
         final_data = {
+            "timestamp": int(time.time()),
+            "method": method_labels.get(detection_mode, detection_mode),
+            "fop_corners": {
+                "left": top_corners,
+                "right": bottom_corners
+            },
             "experiment_id": experiment_id,
             "filename": filename,
             "detection_mode": detection_mode,
             "total_frames": total_frames,
-            "results": all_frames_results,
+            "results": transformed_results,
             "execution_time": time.time() - start_time
         }
         
