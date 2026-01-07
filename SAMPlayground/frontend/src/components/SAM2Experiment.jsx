@@ -1070,20 +1070,98 @@ function SAM2Experiment({ experimentId }) {
                             />
                         </div>
 
-                        <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'center' }}>
-                            <button
-                                className="secondary-button"
-                                onClick={handleDownloadBitmap}
-                                style={{
-                                    padding: '8px 20px',
-                                    fontSize: '1rem',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '8px'
-                                }}
-                            >
-                                🖼️ Download Bitmap with Overlays
-                            </button>
+                        <div className="video-controls-group" style={{
+                            marginTop: '1rem',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '12px',
+                            padding: '12px',
+                            background: '#1a1a1a',
+                            borderRadius: '8px',
+                            border: '1px solid #333',
+                            width: '100%',
+                            boxSizing: 'border-box'
+                        }}>
+                            {/* Row 1: Player Mode and Download */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '15px', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <span style={{ color: '#fff', fontSize: '0.85rem', fontWeight: 500 }}>Display as:</span>
+                                    <div className="button-group" style={{ display: 'flex' }}>
+                                        {['bounds', 'occlude', 'hide'].map((mode) => (
+                                            <button
+                                                key={mode}
+                                                onClick={() => setPlayerViewMode(mode)}
+                                                style={{
+                                                    padding: '4px 12px',
+                                                    fontSize: '0.8rem',
+                                                    backgroundColor: playerViewMode === mode ? '#646cff' : '#444',
+                                                    border: '1px solid #555',
+                                                    borderRight: mode === 'hide' ? '1px solid #555' : 'none',
+                                                    borderRadius: mode === 'bounds' ? '4px 0 0 4px' : mode === 'hide' ? '0 4px 4px 0' : '0',
+                                                    color: 'white',
+                                                    cursor: 'pointer',
+                                                    transition: 'all 0.2s',
+                                                    fontWeight: playerViewMode === mode ? '600' : 'normal',
+                                                    opacity: playerViewMode === mode ? 1 : 0.8
+                                                }}
+                                                onMouseOver={(e) => { if (playerViewMode !== mode) e.currentTarget.style.backgroundColor = '#555'; e.currentTarget.style.opacity = '1'; }}
+                                                onMouseOut={(e) => { if (playerViewMode !== mode) e.currentTarget.style.backgroundColor = '#444'; if (playerViewMode !== mode) e.currentTarget.style.opacity = '0.8'; }}
+                                            >
+                                                {mode.charAt(0).toUpperCase() + mode.slice(1)}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <button
+                                    className="secondary-button"
+                                    onClick={handleDownloadBitmap}
+                                    style={{
+                                        padding: '6px 16px',
+                                        fontSize: '0.9rem',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '8px',
+                                        margin: 0,
+                                        background: '#333',
+                                        border: '1px solid #444'
+                                    }}
+                                >
+                                    🖼️ Download Bitmap
+                                </button>
+                            </div>
+
+                            {/* Row 2: LOS Slider */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                                    <span style={{ color: '#ccc', fontSize: '0.85rem' }}>
+                                        Line of Scrimmage: <strong style={{ color: '#646cff' }}>{(losPosition * 100).toFixed(1)} yards</strong>
+                                    </span>
+                                    {bounds.top.length === 4 && bounds.bottom.length === 4 && (
+                                        <div style={{ color: '#888', fontSize: '0.75rem', fontStyle: 'italic' }}>
+                                            {(() => {
+                                                const topLOS = calculateLOSPolygon(bounds.top[0], bounds.top[1], bounds.top[2], bounds.top[3], losPosition)
+                                                const bottomLOS = calculateLOSPolygon(bounds.bottom[0], bounds.bottom[1], bounds.bottom[2], bounds.bottom[3], losPosition)
+                                                const fmt = (b) => {
+                                                    const aabb = getAABB(b);
+                                                    return `[${Math.round(aabb.minX)},${Math.round(aabb.minY)} - ${Math.round(aabb.maxX)},${Math.round(aabb.maxY)}]`
+                                                }
+                                                return `L-LOS: ${fmt(topLOS)} | R-LOS: ${fmt(bottomLOS)}`
+                                            })()}
+                                        </div>
+                                    )}
+                                </div>
+                                <input
+                                    id="los-slider"
+                                    type="range"
+                                    min="0"
+                                    max="1"
+                                    step="0.001"
+                                    value={losPosition}
+                                    onChange={(e) => setLosPosition(parseFloat(e.target.value))}
+                                    style={{ width: '100%', height: '6px', cursor: 'pointer', accentColor: '#646cff' }}
+                                />
+                            </div>
                         </div>
 
                         {isLoading && (
@@ -1298,88 +1376,6 @@ function SAM2Experiment({ experimentId }) {
                                 </div>
                             </div>
                         )}
-                        {players.top.length > 0 && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px', marginTop: '1rem' }}>
-                                <span style={{ color: '#ccc', fontSize: '0.9rem', minWidth: '50px' }}>Players:</span>
-                                <button
-                                    onClick={() => setPlayerViewMode('bounds')}
-                                    style={{
-                                        flex: 1,
-                                        padding: '4px',
-                                        backgroundColor: playerViewMode === 'bounds' ? '#646cff' : '#444',
-                                        border: 'none',
-                                        borderRadius: '4px',
-                                        color: 'white',
-                                        cursor: 'pointer'
-                                    }}
-                                >
-                                    Bounds
-                                </button>
-                                <button
-                                    onClick={() => setPlayerViewMode('occlude')}
-                                    style={{
-                                        flex: 1,
-                                        padding: '4px',
-                                        backgroundColor: playerViewMode === 'occlude' ? '#646cff' : '#444',
-                                        border: 'none',
-                                        borderRadius: '4px',
-                                        color: 'white',
-                                        cursor: 'pointer'
-                                    }}
-                                >
-                                    Occlude
-                                </button>
-                                <button
-                                    onClick={() => setPlayerViewMode('hide')}
-                                    style={{
-                                        flex: 1,
-                                        padding: '4px',
-                                        backgroundColor: playerViewMode === 'hide' ? '#646cff' : '#444',
-                                        border: 'none',
-                                        borderRadius: '4px',
-                                        color: 'white',
-                                        cursor: 'pointer'
-                                    }}
-                                >
-                                    Hide
-                                </button>
-                            </div>
-                        )}
-
-                        {/* LOS Slider */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', marginTop: '1rem' }}>
-                            <span style={{ color: '#ccc' }}>
-                                Line of Scrimmage: {(losPosition * 100).toFixed(1)} yards
-                            </span>
-                            {bounds.top.length === 4 && bounds.bottom.length === 4 && (
-                                <div style={{ color: '#666', fontSize: '0.75rem', display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                                    {(() => {
-                                        const topLOS = calculateLOSPolygon(bounds.top[0], bounds.top[1], bounds.top[2], bounds.top[3], losPosition)
-                                        const bottomLOS = calculateLOSPolygon(bounds.bottom[0], bounds.bottom[1], bounds.bottom[2], bounds.bottom[3], losPosition)
-                                        const topBox = getAABB(topLOS)
-                                        const bottomBox = getAABB(bottomLOS)
-
-                                        const fmt = (b) => `[${Math.round(b.minX)},${Math.round(b.minY)} - ${Math.round(b.maxX)},${Math.round(b.maxY)}]`
-                                        return (
-                                            <>
-                                                <span>L-LOS: {fmt(topBox)}</span>
-                                                <span>R-LOS: {fmt(bottomBox)}</span>
-                                            </>
-                                        )
-                                    })()}
-                                </div>
-                            )}
-                        </div>
-                        <input
-                            id="los-slider"
-                            type="range"
-                            min="0"
-                            max="1"
-                            step="0.001"
-                            value={losPosition}
-                            onChange={(e) => setLosPosition(parseFloat(e.target.value))}
-                            style={{ width: '100%' }}
-                        />
                     </div>
                 )}
 
