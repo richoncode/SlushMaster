@@ -1027,9 +1027,15 @@ function SAM2Experiment({ experimentId }) {
                             </button>
                             <button
                                 className="secondary-button"
-                                onClick={() => handleVideoLoaded('http://localhost:8000/video/usmnt-1min-2_5s.mp4', 'test')}
+                                onClick={() => handleVideoLoaded('http://localhost:8000/video/soccer_test_5s.mp4', 'test')}
                             >
-                                ⚡ 5-sec Clip
+                                ⚽ 5-sec Soccer
+                            </button>
+                            <button
+                                className="secondary-button"
+                                onClick={() => handleVideoLoaded('http://localhost:8000/video/cfb-pre-snap.mp4', 'test')}
+                            >
+                                🏈 5-sec Football
                             </button>
                         </div>
                     </div>
