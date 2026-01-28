@@ -147,23 +147,6 @@ function SAM2Experiment({ experimentId }) {
                                 finalLOS = 0.5
                             }
 
-                            if (boundsEntry && boundsEntry.data) {
-                                setBounds({
-                                    top: boundsEntry.data.top_corners || topCorners,
-                                    bottom: boundsEntry.data.bottom_corners || bottomCorners
-                                })
-                                // Restore LOS position if available in timeline
-                                if (boundsEntry.data.los_position !== undefined) {
-                                    setLosPosition(boundsEntry.data.los_position)
-                                } else if (filename === 'cfb-pre-snap.mp4') {
-                                    setLosPosition(0.715)
-                                } else if (filename === 'cfb-20251219-NCS-MEM-15sec.mp4') {
-                                    setLosPosition(0.5)
-                                }
-                            } else {
-                                setBounds({ top: topCorners, bottom: bottomCorners })
-                                setLosPosition(finalLOS)
-                            }
 
                             // Check for player detection
                             const playersEntry = data.timeline.slice().reverse().find(entry => entry.step_type === 'players_detected')
@@ -182,6 +165,24 @@ function SAM2Experiment({ experimentId }) {
 
                                 // Player data available in timeline - UI will show based on timeline
                                 // Note: Full player bbox data is now stored in timeline
+                            }
+
+                            if (boundsEntry && boundsEntry.data) {
+                                setBounds({
+                                    top: boundsEntry.data.top_corners || topCorners,
+                                    bottom: boundsEntry.data.bottom_corners || bottomCorners
+                                })
+                                // Restore LOS position if available in timeline
+                                if (boundsEntry.data.los_position !== undefined) {
+                                    setLosPosition(boundsEntry.data.los_position)
+                                } else if (filename === 'cfb-pre-snap.mp4') {
+                                    setLosPosition(0.715)
+                                } else if (filename === 'cfb-20251219-NCS-MEM-15sec.mp4') {
+                                    setLosPosition(0.5)
+                                }
+                            } else {
+                                setBounds({ top: topCorners, bottom: bottomCorners })
+                                setLosPosition(finalLOS)
                             }
                             // UI state determined by timeline, not currentStep
                         }
@@ -730,7 +731,9 @@ function SAM2Experiment({ experimentId }) {
                 'full': 'Full Frame',
                 'fop': 'Within FOP',
                 'los': 'Within LOS',
-                'grid': 'FOP using Grid'
+                'grid': 'FOP using Grid',
+                'fop_1280': 'FOP 1280 (Single)',
+                'grid_1280': 'FOP Bands 1280 (Dynamic)'
             }
 
             // Save timeline entry with full player bbox data AND execution time
@@ -1304,14 +1307,18 @@ function SAM2Experiment({ experimentId }) {
                             <div className="control-section" style={{ marginTop: '1rem', borderTop: '1px solid #333', paddingTop: '1rem' }}>
                                 <div className="button-group" style={{ display: 'flex', gap: '10px' }}>
                                     <span style={{ color: '#ccc', fontSize: '0.9rem', minWidth: '100px', alignSelf: 'center' }}>Detect Players:</span>
-                                    <div style={{ display: 'flex', flex: 1 }}>
-                                        {['Full', 'FOP', 'LOS', 'Grid'].map((mode, idx) => {
-                                            const modeId = mode.toLowerCase()
+                                    <div style={{ display: 'flex', flex: 1, flexWrap: 'wrap', gap: '8px' }}>
+                                        {['Full', 'FOP', 'LOS', 'Grid', 'FOP 1280', 'FOP bands 1280'].map((mode, idx) => {
+                                            const modeId = mode === 'FOP 1280' ? 'fop_1280' : mode === 'FOP bands 1280' ? 'grid_1280' : mode.toLowerCase()
                                             const label = mode === 'Full'
                                                 ? 'Full Frame'
                                                 : mode === 'Grid'
                                                     ? 'FOP using Grid'
-                                                    : `Within ${mode}`
+                                                    : mode === 'FOP 1280'
+                                                        ? 'FOP 1280'
+                                                        : mode === 'FOP bands 1280'
+                                                            ? 'FOP Bands 1280'
+                                                            : `Within ${mode}`
 
                                             // Find latest result for this specific mode
                                             const lastRun = experiment?.timeline?.slice().reverse().find(e =>

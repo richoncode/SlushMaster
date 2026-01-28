@@ -426,7 +426,7 @@ def execute_detection(img, corners, y_offset, view_name, detection_mode, los_pos
             xl, yl, xr, yr = max(0, int(aabb['x1'])), max(0, int(aabb['y1'] - y_offset)), min(img.shape[1], int(aabb['x2'])), min(img.shape[0], int(aabb['y2'] - y_offset))
             region_corners = [{'x': xl, 'y': yl}, {'x': xr, 'y': yl}, {'x': xr, 'y': yr}, {'x': xl, 'y': yr}]
     
-    if detection_mode in ['fop', 'grid']:
+    if detection_mode in ['fop', 'grid', 'fop_1280', 'grid_1280']:
         region_corners = [{'x': c['x'], 'y': c['y'] - y_offset} for c in region_corners]
 
     # Convert simple list to numpy for boundingRect
@@ -437,6 +437,7 @@ def execute_detection(img, corners, y_offset, view_name, detection_mode, los_pos
     if w <= 0 or h <= 0: return [], {"view": view_name, "error": "Invalid region"}
 
     cropped = img[y:y+h, x:x+w]
+    # No changes to image enhancement
     try:
         lab = cv2.cvtColor(cropped, cv2.COLOR_BGR2LAB)
         l, a, b = cv2.split(lab)
@@ -445,30 +446,47 @@ def execute_detection(img, corners, y_offset, view_name, detection_mode, los_pos
         sharpened = cv2.filter2D(enhanced, -1, np.array([[-1,-1,-1], [-1, 9,-1], [-1,-1,-1]]))
     except: sharpened = cropped
 
-    if detection_mode == 'grid' and len(region_corners) == 4:
+    # Grid logic
+    if detection_mode in ['grid', 'grid_1280'] and len(region_corners) == 4:
         p1, p2, p3, p4 = region_corners[0], region_corners[1], region_corners[2], region_corners[3]
-        num_bands, overlap = 10, 0.2
+        
+        if detection_mode == 'grid_1280':
+            # Dynamic bands: target 1280 width with 50px absolute overlap
+            target_w = 1280
+            overlap_px = 50
+            effective_w = target_w - overlap_px # 1230
+            num_bands = int(np.ceil(w / effective_w))
+            # Recalculate overlap T to be exactly overlap_px
+            # Total T range is 1.0. Overlap T is overlap_px / w
+            overlap_t = overlap_px / w if w > 0 else 0.2
+        else:
+            # Original grid: 10 bands, 20% overlap
+            num_bands, overlap_t = 10, 0.2
+            
         band_crops, band_metadata = [], []
         def lerp_p(a, b, t): return {'x': a['x'] + (b['x'] - a['x']) * t, 'y': a['y'] + (b['y'] - a['y']) * t}
         for i in range(num_bands):
-            t_start, t_end = max(0, (i / num_bands) - overlap/2), min(1, ((i + 1) / num_bands) + overlap/2)
+            t_start = max(0, (i / num_bands) - overlap_t/2)
+            t_end = min(1, ((i + 1) / num_bands) + overlap_t/2)
             b_corners = [lerp_p(p1, p2, t_start), lerp_p(p1, p2, t_end), lerp_p(p4, p3, t_end), lerp_p(p4, p3, t_start)]
             bx, by, bw, bh = cv2.boundingRect(np.array([[c['x'], c['y']] for c in b_corners], dtype=np.int32))
             bx, by = max(0, bx), max(0, by)
             bw, bh = min(bw, img.shape[1] - bx), min(bh, img.shape[0] - by)
             if bw > 0 and bh > 0:
                 bcrop = img[by:by+bh, bx:bx+bw]
+                # Light enhance for bands too
                 try:
                     blab = cv2.cvtColor(bcrop, cv2.COLOR_BGR2LAB); bl, ba, bb = cv2.split(blab)
                     bl = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8)).apply(bl)
                     benh = cv2.cvtColor(cv2.merge([bl, ba, bb]), cv2.COLOR_LAB2BGR)
-                    bsharp = cv2.filter2D(benh, -1, np.array([[-1,-1,-1], [-1, 9,-1], [-1,-1,-1]]))
-                    band_crops.append(bsharp)
+                    band_crops.append(cv2.filter2D(benh, -1, np.array([[-1,-1,-1], [-1, 9,-1], [-1,-1,-1]])))
                 except: band_crops.append(bcrop)
                 band_metadata.append({'x': bx, 'y': by})
         
         if band_crops:
-            batch_results = get_yolo_model()(band_crops, conf=0.05, verbose=False)
+            # Use 1280 for grid_1280 bands too
+            yolo_imgsz = 1280 if detection_mode == 'grid_1280' else 640
+            batch_results = get_yolo_model()(band_crops, conf=0.05, imgsz=yolo_imgsz, verbose=False)
             band_players = []
             for idx, result in enumerate(batch_results):
                 meta = band_metadata[idx]
@@ -476,19 +494,21 @@ def execute_detection(img, corners, y_offset, view_name, detection_mode, los_pos
                     if int(box.cls) == 0:
                         b_xyxy = box.xyxy[0].cpu().numpy()
                         band_players.append({'x1': float(b_xyxy[0] + meta['x']), 'y1': float(b_xyxy[1] + meta['y'] + y_offset), 'x2': float(b_xyxy[2] + meta['x']), 'y2': float(b_xyxy[3] + meta['y'] + y_offset), 'confidence': float(box.conf[0].cpu().item())})
-            return apply_nms(band_players), {"view": view_name, "bands": len(band_crops)}
+            return apply_nms(band_players), {"view": view_name, "bands": len(band_crops), "imgsz": yolo_imgsz}
         return [], {"view": view_name, "error": "No valid bands"}
 
+    # Single shot logic
+    yolo_imgsz = 1280 if detection_mode in ['fop_1280', 'grid_1280'] else 640
     model = get_yolo_model()
-    results = model(sharpened, conf=0.05, verbose=False)
+    results = model(sharpened, conf=0.05, imgsz=yolo_imgsz, verbose=False)
     players = []
     for result in results:
         for box in result.boxes:
             if int(box.cls) == 0:
                 xyxy = box.xyxy[0].cpu().numpy()
-                players.append({"x1": int(xyxy[0] + x), "y1": int(xyxy[1] + y + y_offset), "x2": int(xyxy[2] + x), "y2": int(xyxy[3] + y + y_offset), "confidence": float(box.conf[0])})
+                players.append({"x1": float(xyxy[0] + x), "y1": float(xyxy[1] + y + y_offset), "x2": float(xyxy[2] + x), "y2": float(xyxy[3] + y + y_offset), "confidence": float(box.conf[0])})
     players.sort(key=lambda p: p["x1"])
-    return players, {"view": view_name, "crop_size": f"{w}x{h}", "detections": len(players)}
+    return players, {"view": view_name, "crop_size": f"{w}x{h}", "detections": len(players), "imgsz": yolo_imgsz}
 
 @app.post("/detect-players")
 async def detect_players(request: dict):
