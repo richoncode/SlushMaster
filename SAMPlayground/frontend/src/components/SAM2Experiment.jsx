@@ -490,7 +490,7 @@ function SAM2Experiment({ experimentId }) {
             }
 
             // Draw player bboxes if present (merged loop)
-            if (players.top.length > 0) {
+            if (players.top.length > 0 || players.bottom.length > 0) {
                 if (playerViewMode === 'bounds') {
                     ctx.strokeStyle = 'yellow'
                     ctx.lineWidth = 3
