@@ -1074,6 +1074,12 @@ function SAM2Experiment({ experimentId }) {
                             <VideoUploader onUploadComplete={handleVideoLoaded} />
                             <button
                                 className="secondary-button"
+                                onClick={() => handleVideoLoaded('http://localhost:8000/video/cfb-20251219-NCS-MEM-15sec.mp4', 'test')}
+                            >
+                                🏈 ESPN-LOS Test
+                            </button>
+                            <button
+                                className="secondary-button"
                                 onClick={() => handleVideoLoaded('http://localhost:8000/video/usmnt-1min-2.mp4', 'test')}
                             >
                                 🎬 USMNT Clip
