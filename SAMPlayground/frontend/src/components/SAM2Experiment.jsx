@@ -4,6 +4,15 @@ import ErrorBoundary from './ErrorBoundary'
 import SequentialResults from './SequentialResults'
 import './SAM2Experiment.css'
 
+const methodLabels = {
+    'full': 'Full Frame',
+    'fop': 'Within FOP',
+    'los': 'Within LOS',
+    'grid': 'FOP using Grid',
+    'fop_1280': 'FOP 1280 (Single)',
+    'grid_1280': 'FOP Bands 1280 (Dynamic)'
+}
+
 function SAM2Experiment({ experimentId }) {
     const [experiment, setExperiment] = useState(null)
     const [experimentName, setExperimentName] = useState('unnamed experiment')
@@ -144,7 +153,7 @@ function SAM2Experiment({ experimentId }) {
                                     { x: 3426, y: 3521 }, // p3
                                     { x: 297, y: 3520 }   // p4
                                 ]
-                                finalLOS = 0.5
+                                finalLOS = 0.752
                             }
 
 
@@ -178,7 +187,7 @@ function SAM2Experiment({ experimentId }) {
                                 } else if (filename === 'cfb-pre-snap.mp4') {
                                     setLosPosition(0.715)
                                 } else if (filename === 'cfb-20251219-NCS-MEM-15sec.mp4') {
-                                    setLosPosition(0.5)
+                                    setLosPosition(0.752)
                                 }
                             } else {
                                 setBounds({ top: topCorners, bottom: bottomCorners })
@@ -413,7 +422,7 @@ function SAM2Experiment({ experimentId }) {
                     { x: 3426, y: 3521 }, // p3
                     { x: 297, y: 3520 }   // p4
                 ]
-                finalLOS = 0.5
+                finalLOS = 0.752
             }
 
             setFrameData({ ...data, top_corners: topCorners, bottom_corners: bottomCorners })
@@ -725,16 +734,6 @@ function SAM2Experiment({ experimentId }) {
                 similarity: data.similarity || 0,
                 metadata: data.metadata || {}
             })
-
-            // Map mode to readable label
-            const methodLabels = {
-                'full': 'Full Frame',
-                'fop': 'Within FOP',
-                'los': 'Within LOS',
-                'grid': 'FOP using Grid',
-                'fop_1280': 'FOP 1280 (Single)',
-                'grid_1280': 'FOP Bands 1280 (Dynamic)'
-            }
 
             // Save timeline entry with full player bbox data AND execution time
             await saveTimelineEntry('players_detected', {
@@ -1319,11 +1318,10 @@ function SAM2Experiment({ experimentId }) {
                                                         : mode === 'FOP bands 1280'
                                                             ? 'FOP Bands 1280'
                                                             : `Within ${mode}`
-
                                             // Find latest result for this specific mode
                                             const lastRun = experiment?.timeline?.slice().reverse().find(e =>
                                                 e.step_type === 'players_detected' &&
-                                                (e.data?.method === label || e.data?.method === mode)
+                                                (e.data?.method === label || e.data?.method === mode || e.data?.method === methodLabels[modeId])
                                             )
 
                                             const isActive = activeDetectionMethod === modeId
@@ -1358,9 +1356,9 @@ function SAM2Experiment({ experimentId }) {
                                                         padding: '10px 12px',
                                                         backgroundColor: isActive ? '#646cff' : '#444',
                                                         border: '1px solid #555',
-                                                        borderRight: idx < 3 ? 'none' : '1px solid #555',
+                                                        borderRight: idx < 5 ? 'none' : '1px solid #555', // Updated for 6 buttons
                                                         borderLeft: idx > 0 ? 'none' : '1px solid #555',
-                                                        borderRadius: idx === 0 ? '4px 0 0 4px' : idx === 3 ? '0 4px 4px 0' : '0',
+                                                        borderRadius: idx === 0 ? '4px 0 0 4px' : idx === 5 ? '0 4px 4px 0' : '0', // Updated for 6 buttons
                                                         color: 'white',
                                                         cursor: 'pointer',
                                                         minHeight: '80px',
