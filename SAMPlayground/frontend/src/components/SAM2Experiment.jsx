@@ -116,7 +116,7 @@ function SAM2Experiment({ experimentId }) {
                             let bottomCorners = boundsData.bottom_corners
                             let finalLOS = 0.281 // Default
 
-                            // Special defaults for Football Test Clip if no adjustments yet
+                            // Special defaults for Football Test Clips
                             if (filename === 'cfb-pre-snap.mp4') {
                                 topCorners = [
                                     { x: 951, y: 898 },   // p1
@@ -131,6 +131,20 @@ function SAM2Experiment({ experimentId }) {
                                     { x: 288, y: 3517 }   // p4
                                 ]
                                 finalLOS = 0.715
+                            } else if (filename === 'cfb-20251219-NCS-MEM-15sec.mp4') {
+                                topCorners = [
+                                    { x: 949, y: 900 },   // p1
+                                    { x: 2979, y: 900 },  // p2
+                                    { x: 3545, y: 1354 }, // p3
+                                    { x: 417, y: 1364 }   // p4
+                                ]
+                                bottomCorners = [
+                                    { x: 873, y: 3056 },  // p1
+                                    { x: 2894, y: 3059 }, // p2
+                                    { x: 3426, y: 3521 }, // p3
+                                    { x: 297, y: 3520 }   // p4
+                                ]
+                                finalLOS = 0.5
                             }
 
                             if (boundsEntry && boundsEntry.data) {
@@ -143,6 +157,8 @@ function SAM2Experiment({ experimentId }) {
                                     setLosPosition(boundsEntry.data.los_position)
                                 } else if (filename === 'cfb-pre-snap.mp4') {
                                     setLosPosition(0.715)
+                                } else if (filename === 'cfb-20251219-NCS-MEM-15sec.mp4') {
+                                    setLosPosition(0.5)
                                 }
                             } else {
                                 setBounds({ top: topCorners, bottom: bottomCorners })
@@ -366,7 +382,7 @@ function SAM2Experiment({ experimentId }) {
             let bottomCorners = data.bottom_corners
             let finalLOS = 0.281 // Default
 
-            // Special defaults for Football Test Clip
+            // Special defaults for Football Test Clips
             if (filename === 'cfb-pre-snap.mp4') {
                 console.log('Applying football defaults for cfb-pre-snap.mp4')
                 topCorners = [
@@ -382,6 +398,21 @@ function SAM2Experiment({ experimentId }) {
                     { x: 288, y: 3517 }   // p4
                 ]
                 finalLOS = 0.715
+            } else if (filename === 'cfb-20251219-NCS-MEM-15sec.mp4') {
+                console.log('Applying football defaults for cfb-20251219-NCS-MEM-15sec.mp4')
+                topCorners = [
+                    { x: 949, y: 900 },   // p1
+                    { x: 2979, y: 900 },  // p2
+                    { x: 3545, y: 1354 }, // p3
+                    { x: 417, y: 1364 }   // p4
+                ]
+                bottomCorners = [
+                    { x: 873, y: 3056 },  // p1
+                    { x: 2894, y: 3059 }, // p2
+                    { x: 3426, y: 3521 }, // p3
+                    { x: 297, y: 3520 }   // p4
+                ]
+                finalLOS = 0.5
             }
 
             setFrameData({ ...data, top_corners: topCorners, bottom_corners: bottomCorners })
