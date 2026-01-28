@@ -111,13 +111,42 @@ function SAM2Experiment({ experimentId }) {
                             // Check for bounds_adjusted entry or use detected bounds
                             // Use slice() to create a copy before reversing to avoid mutating state
                             const boundsEntry = data.timeline.slice().reverse().find(entry => entry.step_type === 'bounds_adjusted')
+
+                            let topCorners = boundsData.top_corners
+                            let bottomCorners = boundsData.bottom_corners
+                            let finalLOS = 0.281 // Default
+
+                            // Special defaults for Football Test Clip if no adjustments yet
+                            if (filename === 'cfb-pre-snap.mp4') {
+                                topCorners = [
+                                    { x: 951, y: 898 },   // p1
+                                    { x: 2985, y: 900 },  // p2
+                                    { x: 3555, y: 1364 }, // p3
+                                    { x: 408, y: 1367 }   // p4
+                                ]
+                                bottomCorners = [
+                                    { x: 863, y: 3056 },  // p1
+                                    { x: 2888, y: 3059 }, // p2
+                                    { x: 3423, y: 3524 }, // p3
+                                    { x: 288, y: 3517 }   // p4
+                                ]
+                                finalLOS = 0.715
+                            }
+
                             if (boundsEntry && boundsEntry.data) {
                                 setBounds({
-                                    top: boundsEntry.data.top_corners || boundsData.top_corners,
-                                    bottom: boundsEntry.data.bottom_corners || boundsData.bottom_corners
+                                    top: boundsEntry.data.top_corners || topCorners,
+                                    bottom: boundsEntry.data.bottom_corners || bottomCorners
                                 })
+                                // Restore LOS position if available in timeline
+                                if (boundsEntry.data.los_position !== undefined) {
+                                    setLosPosition(boundsEntry.data.los_position)
+                                } else if (filename === 'cfb-pre-snap.mp4') {
+                                    setLosPosition(0.715)
+                                }
                             } else {
-                                setBounds({ top: boundsData.top_corners, bottom: boundsData.bottom_corners })
+                                setBounds({ top: topCorners, bottom: bottomCorners })
+                                setLosPosition(finalLOS)
                             }
 
                             // Check for player detection
@@ -332,17 +361,41 @@ function SAM2Experiment({ experimentId }) {
 
             const data = await response.json()
             console.log('Received field bounds data:', data)
-            setFrameData(data)
-            console.log('Set frameData to:', data)
-            setBounds({ top: data.top_corners, bottom: data.bottom_corners })
-            console.log('Set bounds:', { top: data.top_corners, bottom: data.bottom_corners })
+
+            let topCorners = data.top_corners
+            let bottomCorners = data.bottom_corners
+            let finalLOS = 0.281 // Default
+
+            // Special defaults for Football Test Clip
+            if (filename === 'cfb-pre-snap.mp4') {
+                console.log('Applying football defaults for cfb-pre-snap.mp4')
+                topCorners = [
+                    { x: 951, y: 898 },   // p1
+                    { x: 2985, y: 900 },  // p2
+                    { x: 3555, y: 1364 }, // p3
+                    { x: 408, y: 1367 }   // p4
+                ]
+                bottomCorners = [
+                    { x: 863, y: 3056 },  // p1
+                    { x: 2888, y: 3059 }, // p2
+                    { x: 3423, y: 3524 }, // p3
+                    { x: 288, y: 3517 }   // p4
+                ]
+                finalLOS = 0.715
+            }
+
+            setFrameData({ ...data, top_corners: topCorners, bottom_corners: bottomCorners })
+            setBounds({ top: topCorners, bottom: bottomCorners })
+            setLosPosition(finalLOS)
+            console.log('Set bounds and LOS:', { top: topCorners, bottom: bottomCorners, los: finalLOS })
 
             // Save initial bounds to timeline so they persist
             await saveTimelineEntry('bounds_adjusted', {
-                top_corners: data.top_corners,
-                bottom_corners: data.bottom_corners,
-                top_aabb: getAABB(data.top_corners),
-                bottom_aabb: getAABB(data.bottom_corners)
+                top_corners: topCorners,
+                bottom_corners: bottomCorners,
+                top_aabb: getAABB(topCorners),
+                bottom_aabb: getAABB(bottomCorners),
+                los_position: finalLOS
             })
             // UI state now determined by timeline, not currentStep
         } catch (error) {
