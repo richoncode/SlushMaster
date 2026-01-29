@@ -1402,16 +1402,24 @@ function SAM2Experiment({ experimentId }) {
                                 {/* Entire Clip Detection Row */}
                                 <div className="button-group" style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
                                     <span style={{ color: '#ccc', fontSize: '0.9rem', minWidth: '100px', alignSelf: 'center' }}>Entire Clip:</span>
-                                    <div style={{ display: 'flex', flex: 1, position: 'relative' }}>
-                                        {['Full', 'FOP', 'LOS', 'Grid'].map((mode, idx) => {
-                                            const modeId = mode.toLowerCase()
-                                            const label = mode === 'Full' ? 'Full Frame' : mode === 'Grid' ? 'FOP using Grid' : `Within ${mode}`
+                                    <div style={{ display: 'flex', flex: 1, position: 'relative', flexWrap: 'wrap', gap: '8px' }}>
+                                        {['Full', 'FOP', 'LOS', 'Grid', 'FOP 1280', 'FOP bands 1280'].map((mode, idx) => {
+                                            const modeId = mode === 'FOP 1280' ? 'fop_1280' : mode === 'FOP bands 1280' ? 'grid_1280' : mode.toLowerCase()
+                                            const label = mode === 'Full'
+                                                ? 'Full Frame'
+                                                : mode === 'Grid'
+                                                    ? 'FOP using Grid'
+                                                    : mode === 'FOP 1280'
+                                                        ? 'FOP 1280'
+                                                        : mode === 'FOP bands 1280'
+                                                            ? 'FOP Bands 1280'
+                                                            : `Within ${mode}`
                                             const isRunning = fullClipDetectionProgress?.status === 'processing' || fullClipDetectionProgress?.status === 'starting';
 
                                             // Find latest full-clip run for this specific mode
                                             const lastFullRun = experiment?.timeline?.slice().reverse().find(e =>
                                                 e.step_type === 'full_clip_detection_completed' &&
-                                                (e.data?.method === label || e.data?.method === mode)
+                                                (e.data?.method === label || e.data?.method === mode || e.data?.method === methodLabels[modeId])
                                             )
 
                                             return (
@@ -1428,9 +1436,9 @@ function SAM2Experiment({ experimentId }) {
                                                         padding: '10px 12px',
                                                         backgroundColor: '#222',
                                                         border: '1px solid #555',
-                                                        borderRight: idx < 3 ? 'none' : '1px solid #555',
+                                                        borderRight: idx < 5 ? 'none' : '1px solid #555',
                                                         borderLeft: idx > 0 ? 'none' : '1px solid #555',
-                                                        borderRadius: idx === 0 ? '4px 0 0 4px' : idx === 3 ? '0 4px 4px 0' : '0',
+                                                        borderRadius: idx === 0 ? '4px 0 0 4px' : idx === 5 ? '0 4px 4px 0' : '0',
                                                         color: 'white',
                                                         cursor: (isLoading || isRunning) ? 'not-allowed' : 'pointer',
                                                         minHeight: '80px',
