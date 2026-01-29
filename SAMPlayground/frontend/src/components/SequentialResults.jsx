@@ -112,57 +112,11 @@ function SequentialResults({ experiment, bounds, players, segmentResult }) {
 
             case 'full_clip_detection_completed':
                 return (
-                    <div key={entry.id || index} className="result-entry detection-entry full-clip-entry">
-                        <div className="entry-header">
-                            <span className="entry-icon">🎥</span>
-                            <span className="entry-title">Full Clip Detection Complete</span>
-                            {duration && <span className="entry-duration">{duration}</span>}
-                        </div>
-                        <div className="entry-content">
-                            <div className="summary-stats" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
-                                <span className="stat-pill" style={{ padding: '2px 8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', fontSize: '0.85rem' }}>Method: {entry.data.method}</span>
-                                <span className="stat-pill" style={{ padding: '2px 8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', fontSize: '0.85rem' }}>Frames: {entry.data.total_frames}</span>
-                                <span className="stat-pill" style={{ padding: '2px 8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', fontSize: '0.85rem' }}>Time: {entry.data.execution_time?.toFixed(1)}s</span>
-                                <span className="stat-pill" style={{ padding: '2px 8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', fontSize: '0.85rem' }}>Size: {(entry.data.file_size / 1024 / 1024).toFixed(2)} MB</span>
-                            </div>
-                            <div className="entry-actions">
-                                <button
-                                    onClick={async () => {
-                                        try {
-                                            const response = await fetch(entry.data.result_url)
-                                            const jsonData = await response.json()
-                                            const blob = new Blob([JSON.stringify(jsonData, null, 2)], { type: 'application/octet-stream' })
-                                            const url = URL.createObjectURL(blob)
-                                            const a = document.createElement('a')
-                                            a.href = url
-                                            a.download = entry.data.filename || `detection_${new Date(entry.timestamp).getTime()}.json`
-                                            document.body.appendChild(a)
-                                            a.click()
-                                            document.body.removeChild(a)
-                                            URL.revokeObjectURL(url)
-                                        } catch (error) {
-                                            console.error('Failed to download JSON:', error)
-                                        }
-                                    }}
-                                    className="secondary-button"
-                                    style={{
-                                        textDecoration: 'none',
-                                        backgroundColor: '#28a745',
-                                        color: 'white',
-                                        padding: '6px 15px',
-                                        borderRadius: '4px',
-                                        fontSize: '0.9rem',
-                                        fontWeight: 'bold',
-                                        display: 'inline-block',
-                                        border: 'none',
-                                        cursor: 'pointer'
-                                    }}
-                                >
-                                    📥 Download Full Results JSON
-                                </button>
-                            </div>
-                        </div>
-                    </div>
+                    <DetectionResultCard
+                        key={entry.id || index}
+                        entry={entry}
+                        duration={duration}
+                    />
                 )
 
             case 'players_detected':
