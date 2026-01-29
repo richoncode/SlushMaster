@@ -1,5 +1,6 @@
 import React from 'react'
 import './SequentialResults.css'
+import DetectionResultCard from './DetectionResultCard'
 
 function SequentialResults({ experiment, bounds, players, segmentResult }) {
     if (!experiment || !experiment.timeline || experiment.timeline.length === 0) {
@@ -45,7 +46,7 @@ function SequentialResults({ experiment, bounds, players, segmentResult }) {
             }
         }
 
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/octet-stream' })
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
@@ -166,9 +167,24 @@ function SequentialResults({ experiment, bounds, players, segmentResult }) {
                                 <span className="stat-pill" style={{ padding: '2px 8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', fontSize: '0.85rem' }}>Size: {(entry.data.file_size / 1024 / 1024).toFixed(2)} MB</span>
                             </div>
                             <div className="entry-actions">
-                                <a
-                                    href={entry.data.result_url}
-                                    download
+                                <button
+                                    onClick={async () => {
+                                        try {
+                                            const response = await fetch(entry.data.result_url)
+                                            const jsonData = await response.json()
+                                            const blob = new Blob([JSON.stringify(jsonData, null, 2)], { type: 'application/octet-stream' })
+                                            const url = URL.createObjectURL(blob)
+                                            const a = document.createElement('a')
+                                            a.href = url
+                                            a.download = entry.data.filename || `detection_${new Date(entry.timestamp).getTime()}.json`
+                                            document.body.appendChild(a)
+                                            a.click()
+                                            document.body.removeChild(a)
+                                            URL.revokeObjectURL(url)
+                                        } catch (error) {
+                                            console.error('Failed to download JSON:', error)
+                                        }
+                                    }}
                                     className="secondary-button"
                                     style={{
                                         textDecoration: 'none',
@@ -178,131 +194,28 @@ function SequentialResults({ experiment, bounds, players, segmentResult }) {
                                         borderRadius: '4px',
                                         fontSize: '0.9rem',
                                         fontWeight: 'bold',
-                                        display: 'inline-block'
+                                        display: 'inline-block',
+                                        border: 'none',
+                                        cursor: 'pointer'
                                     }}
                                 >
                                     📥 Download Full Results JSON
-                                </a>
+                                </button>
                             </div>
                         </div>
                     </div>
                 )
 
             case 'players_detected':
-                const boundsEntry = timeline.slice(0, index).reverse().find(e => e.step_type === 'bounds_adjusted')
-                const method = entry.data.method || 'Unknown'
-                const isFOP = method.toLowerCase().includes('fop')
-                const isFull = method.toLowerCase().includes('full')
-
-                const getBoundsText = (aabb) => {
-                    if (!aabb) return 'N/A'
-                    return `[${Math.round(aabb.minX)}, ${Math.round(aabb.minY)} - ${Math.round(aabb.maxX)}, ${Math.round(aabb.maxY)}]`
-                }
-
+                const boundsEntryForDetection = timeline.slice(0, index).reverse().find(e => e.step_type === 'bounds_adjusted')
                 return (
-                    <div key={entry.id || index} className="result-entry players-entry">
-                        <div className="entry-header" style={{ flexDirection: 'column', alignItems: 'center', gap: '0.25rem', padding: '0.5rem' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
-                                <span className="entry-icon">👥</span>
-                                <span className="entry-title" style={{ flex: 'none' }}>Players Detected</span>
-                                <span className="detection-method-badge" style={{
-                                    marginLeft: '0.5rem',
-                                    padding: '2px 8px',
-                                    borderRadius: '12px',
-                                    background: '#333',
-                                    color: '#fff',
-                                    fontSize: '0.8rem',
-                                    border: '1px solid #555',
-                                    alignSelf: 'center'
-                                }}>
-                                    {method} Mode
-                                </span>
-                                {entry.data.execution_time !== undefined ? (
-                                    <span className="entry-duration" style={{ marginLeft: '0.5rem' }} title="Execution time">
-                                        ⏱️ {entry.data.execution_time.toFixed(2)}s
-                                    </span>
-                                ) : (
-                                    duration && <span className="entry-duration" style={{ marginLeft: '0.5rem' }}>{duration}</span>
-                                )}
-                                <button
-                                    className="download-json-btn"
-                                    onClick={() => handleDownloadJSON(entry)}
-                                    title="Download detection data as JSON"
-                                    style={{
-                                        marginLeft: 'auto',
-                                        background: '#444',
-                                        border: '1px solid #555',
-                                        borderRadius: '4px',
-                                        color: '#fff',
-                                        padding: '4px 8px',
-                                        fontSize: '0.75rem',
-                                        cursor: 'pointer',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '4px'
-                                    }}
-                                >
-                                    📥 JSON
-                                </button>
-                            </div>
-                            <div className="similarity" style={{ fontSize: '0.9rem', color: '#aaa' }}>
-                                Stereo Similarity: {((entry.data.similarity || 0) * 100).toFixed(0)}%
-                            </div>
-                        </div>
-                        <div className="entry-content">
-                            {/* Detailed Player Lists with Counts merged in */}
-                            <div className="player-lists-detail" style={{ marginTop: '0', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-
-                                {/* Left View Column */}
-                                <div className="player-list-group">
-                                    <div className="column-header" style={{ marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid #444' }}>
-                                        <h5 style={{ margin: 0, color: '#fff', fontSize: '1rem' }}>
-                                            Left (Top View) <span style={{ background: '#333', padding: '2px 6px', borderRadius: '4px', marginLeft: '0.5rem' }}>{entry.data.top_count || 0}</span>
-                                        </h5>
-                                        {!isFull && boundsEntry?.data?.top_aabb && (
-                                            <div className="badge-text" style={{ fontSize: '0.75rem', marginTop: '0.25rem', color: '#888' }}>
-                                                Bounds: {getBoundsText(boundsEntry.data.top_aabb)}
-                                            </div>
-                                        )}
-                                        {isFull && <div className="badge-text" style={{ fontSize: '0.75rem', marginTop: '0.25rem', color: '#888' }}>Full Frame</div>}
-                                    </div>
-
-                                    <div className="player-items-scroll" style={{ maxHeight: '200px', overflowY: 'auto', background: '#222', padding: '0.5rem', borderRadius: '4px' }}>
-                                        {(entry.data.top_players || []).map((p, i) => (
-                                            <div key={i} style={{ fontSize: '0.8rem', color: '#aaa', marginBottom: '0.25rem' }}>
-                                                #{i + 1}: ({Math.round(p.x1)}, {Math.round(p.y1)}) → ({Math.round(p.x2)}, {Math.round(p.y2)}) <span style={{ color: '#666' }}>[{p.confidence?.toFixed(2)}]</span>
-                                            </div>
-                                        ))}
-                                        {(!entry.data.top_players || entry.data.top_players.length === 0) && <div style={{ fontSize: '0.8rem', color: '#666' }}>No players</div>}
-                                    </div>
-                                </div>
-
-                                {/* Right View Column */}
-                                <div className="player-list-group">
-                                    <div className="column-header" style={{ marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid #444' }}>
-                                        <h5 style={{ margin: 0, color: '#fff', fontSize: '1rem' }}>
-                                            Right (Bottom View) <span style={{ background: '#333', padding: '2px 6px', borderRadius: '4px', marginLeft: '0.5rem' }}>{entry.data.bottom_count || 0}</span>
-                                        </h5>
-                                        {!isFull && boundsEntry?.data?.bottom_aabb && (
-                                            <div className="badge-text" style={{ fontSize: '0.75rem', marginTop: '0.25rem', color: '#888' }}>
-                                                Bounds: {getBoundsText(boundsEntry.data.bottom_aabb)}
-                                            </div>
-                                        )}
-                                        {isFull && <div className="badge-text" style={{ fontSize: '0.75rem', marginTop: '0.25rem', color: '#888' }}>Full Frame</div>}
-                                    </div>
-
-                                    <div className="player-items-scroll" style={{ maxHeight: '200px', overflowY: 'auto', background: '#222', padding: '0.5rem', borderRadius: '4px' }}>
-                                        {(entry.data.bottom_players || []).map((p, i) => (
-                                            <div key={i} style={{ fontSize: '0.8rem', color: '#aaa', marginBottom: '0.25rem' }}>
-                                                #{i + 1}: ({Math.round(p.x1)}, {Math.round(p.y1)}) → ({Math.round(p.x2)}, {Math.round(p.y2)}) <span style={{ color: '#666' }}>[{p.confidence?.toFixed(2)}]</span>
-                                            </div>
-                                        ))}
-                                        {(!entry.data.bottom_players || entry.data.bottom_players.length === 0) && <div style={{ fontSize: '0.8rem', color: '#666' }}>No players</div>}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                    <DetectionResultCard
+                        key={entry.id || index}
+                        entry={entry}
+                        boundsEntry={boundsEntryForDetection}
+                        duration={duration}
+                        onDownloadJSON={handleDownloadJSON}
+                    />
                 )
 
             case 'segmentation_completed':
