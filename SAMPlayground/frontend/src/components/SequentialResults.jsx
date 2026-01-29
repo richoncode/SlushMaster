@@ -15,47 +15,6 @@ function SequentialResults({ experiment, bounds, players, segmentResult }) {
         return diff < 60 ? `${diff.toFixed(1)}s` : `${(diff / 60).toFixed(1)}m`
     }
 
-    const handleDownloadJSON = (entry) => {
-        const transformPlayer = (p) => ({
-            centerX: Math.round((p.x1 + p.x2) / 2),
-            centerY: Math.round((p.y1 + p.y2) / 2),
-            radiusX: Math.round((p.x2 - p.x1) / 2),
-            radiusY: Math.round((p.y2 - p.y1) / 2),
-            confidence: parseFloat((p.confidence || 0).toFixed(4))
-        })
-
-        // Find the most recent bounds entry before or at this detection
-        const entryIndex = experiment.timeline.indexOf(entry)
-        const boundsEntry = experiment.timeline
-            .slice(0, entryIndex + 1)
-            .reverse()
-            .find(e => e.step_type === 'bounds_adjusted')
-
-        const data = {
-            timestamp: entry.timestamp,
-            method: entry.data.method,
-            fop_corners: {
-                left: boundsEntry?.data?.top_corners || [],
-                right: boundsEntry?.data?.bottom_corners || []
-            },
-            frame: {
-                videoTimestamp: entry.data.video_timestamp ?? 0.0,
-                frameNumber: entry.data.frame_number ?? 0,
-                left_view: (entry.data.top_players || []).map(transformPlayer),
-                right_view: (entry.data.bottom_players || []).map(transformPlayer)
-            }
-        }
-
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/octet-stream' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `detection_${new Date(entry.timestamp).getTime()}.json`
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        URL.revokeObjectURL(url)
-    }
 
     const renderEntry = (entry, index, timeline) => {
         const duration = index < timeline.length - 1 ? formatDuration(entry.timestamp, timeline[index + 1].timestamp) : null
@@ -214,7 +173,6 @@ function SequentialResults({ experiment, bounds, players, segmentResult }) {
                         entry={entry}
                         boundsEntry={boundsEntryForDetection}
                         duration={duration}
-                        onDownloadJSON={handleDownloadJSON}
                     />
                 )
 

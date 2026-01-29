@@ -1,7 +1,7 @@
 import React from 'react'
 import './SequentialResults.css' // Reusing existing styles for now
 
-function DetectionResultCard({ entry, boundsEntry, duration, onDownloadJSON }) {
+function DetectionResultCard({ entry, boundsEntry, duration }) {
     const method = entry.data.method || 'Unknown'
     const isFOP = method.toLowerCase().includes('fop')
     const isFull = method.toLowerCase().includes('full')
@@ -9,6 +9,41 @@ function DetectionResultCard({ entry, boundsEntry, duration, onDownloadJSON }) {
     const getBoundsText = (aabb) => {
         if (!aabb) return 'N/A'
         return `[${Math.round(aabb.minX)}, ${Math.round(aabb.minY)} - ${Math.round(aabb.maxX)}, ${Math.round(aabb.maxY)}]`
+    }
+
+    const handleDownloadJSON = () => {
+        const transformPlayer = (p) => ({
+            centerX: Math.round((p.x1 + p.x2) / 2),
+            centerY: Math.round((p.y1 + p.y2) / 2),
+            radiusX: Math.round((p.x2 - p.x1) / 2),
+            radiusY: Math.round((p.y2 - p.y1) / 2),
+            confidence: parseFloat((p.confidence || 0).toFixed(4))
+        })
+
+        const data = {
+            timestamp: entry.timestamp,
+            method: entry.data.method,
+            fop_corners: {
+                left: boundsEntry?.data?.top_corners || [],
+                right: boundsEntry?.data?.bottom_corners || []
+            },
+            frame: {
+                videoTimestamp: entry.data.video_timestamp ?? 0.0,
+                frameNumber: entry.data.frame_number ?? 0,
+                left_view: (entry.data.top_players || []).map(transformPlayer),
+                right_view: (entry.data.bottom_players || []).map(transformPlayer)
+            }
+        }
+
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/octet-stream' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `detection_${new Date(entry.timestamp).getTime()}.json`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
     }
 
     return (
@@ -38,7 +73,7 @@ function DetectionResultCard({ entry, boundsEntry, duration, onDownloadJSON }) {
                     )}
                     <button
                         className="download-json-btn"
-                        onClick={() => onDownloadJSON(entry)}
+                        onClick={handleDownloadJSON}
                         title="Download detection data as JSON"
                         style={{
                             marginLeft: 'auto',
