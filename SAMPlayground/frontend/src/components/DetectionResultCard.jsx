@@ -12,59 +12,67 @@ function DetectionResultCard({ entry, boundsEntry, duration }) {
     }
 
     const handleDownloadJSON = async () => {
+        // Case 1: Full video detection (URL provided)
         if (entry.data.result_url) {
             try {
                 const response = await fetch(entry.data.result_url)
-                const jsonData = await response.json()
-                const blob = new Blob([JSON.stringify(jsonData, null, 2)], { type: 'application/octet-stream' })
+                if (!response.ok) throw new Error(`Fetch failed: ${response.status}`)
+
+                const blob = await response.blob()
                 const url = URL.createObjectURL(blob)
                 const a = document.createElement('a')
                 a.href = url
-                a.download = entry.data.filename || `detection_${new Date(entry.timestamp).getTime()}.json`
+                a.download = entry.data.filename || `detection_full_${new Date(entry.timestamp).getTime()}.json`
                 document.body.appendChild(a)
                 a.click()
                 document.body.removeChild(a)
-                URL.revokeObjectURL(url)
+                setTimeout(() => URL.revokeObjectURL(url), 100)
             } catch (error) {
                 console.error('Failed to download JSON:', error)
+                alert('Download failed. Check console for details.')
             }
             return
         }
 
-        const transformPlayer = (p) => ({
-            centerX: Math.round((p.x1 + p.x2) / 2),
-            centerY: Math.round((p.y1 + p.y2) / 2),
-            radiusX: Math.round((p.x2 - p.x1) / 2),
-            radiusY: Math.round((p.y2 - p.y1) / 2),
-            confidence: parseFloat((p.confidence || 0).toFixed(4))
-        })
+        // Case 2: Single frame detection (Generate from data)
+        try {
+            const transformPlayer = (p) => ({
+                centerX: Math.round((p.x1 + p.x2) / 2),
+                centerY: Math.round((p.y1 + p.y2) / 2),
+                radiusX: Math.round((p.x2 - p.x1) / 2),
+                radiusY: Math.round((p.y2 - p.y1) / 2),
+                confidence: parseFloat((p.confidence || 0).toFixed(4))
+            })
 
-        const data = {
-            timestamp: entry.timestamp,
-            method: entry.data.method,
-            fop_corners: {
-                left: boundsEntry?.data?.top_corners || [],
-                right: boundsEntry?.data?.bottom_corners || []
-            },
-            frame: {
-                videoTimestamp: entry.data.video_timestamp ?? 0.0,
-                frameNumber: entry.data.frame_number ?? 0,
-                left_view: (entry.data.top_players || []).map(transformPlayer),
-                right_view: (entry.data.bottom_players || []).map(transformPlayer)
+            const data = {
+                timestamp: entry.timestamp,
+                method: entry.data.method,
+                fop_corners: {
+                    left: boundsEntry?.data?.top_corners || [],
+                    right: boundsEntry?.data?.bottom_corners || []
+                },
+                frame: {
+                    videoTimestamp: entry.data.video_timestamp ?? 0.0,
+                    frameNumber: entry.data.frame_number ?? 0,
+                    left_view: (entry.data.top_players || []).map(transformPlayer),
+                    right_view: (entry.data.bottom_players || []).map(transformPlayer)
+                }
             }
+
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `detection_${new Date(entry.timestamp).getTime()}.json`
+            document.body.appendChild(a)
+            a.click()
+            document.body.removeChild(a)
+            setTimeout(() => URL.revokeObjectURL(url), 100)
+        } catch (error) {
+            console.error('Error generating JSON:', error)
+            alert('Error generating download.')
         }
-
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/octet-stream' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `detection_${new Date(entry.timestamp).getTime()}.json`
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        URL.revokeObjectURL(url)
     }
-
     const isFullClip = entry.step_type === 'full_clip_detection_completed'
 
     return (
